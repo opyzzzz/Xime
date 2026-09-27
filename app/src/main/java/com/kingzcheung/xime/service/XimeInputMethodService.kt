@@ -477,17 +477,6 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                     stopClipboardSync()
                     updateClipboardSync()
                 }
-                SettingsPreferences.KEY_HARDWARE_KEYBOARD_DETECTION_ENABLED -> {
-                    hasHardwareKeyboard = SettingsPreferences.isHardwareKeyboardDetectionEnabled(this@XimeInputMethodService) &&
-                        resources.configuration.keyboard != android.content.res.Configuration.KEYBOARD_NOKEYS
-                    applyCompactMode()
-                    applyWindowBackground()
-                    if (hasHardwareKeyboard) {
-                        currentInputConnection?.requestCursorUpdates(
-                            InputConnection.CURSOR_UPDATE_MONITOR or InputConnection.CURSOR_UPDATE_IMMEDIATE
-                        )
-                    }
-                }
             }
         }
         prefs.registerOnSharedPreferenceChangeListener(sharedPrefsListener)
@@ -1991,8 +1980,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         info?.let { updateEnterKeyText(it) }
-        hasHardwareKeyboard = SettingsPreferences.isHardwareKeyboardDetectionEnabled(this) &&
-            resources.configuration.keyboard != android.content.res.Configuration.KEYBOARD_NOKEYS
+        hasHardwareKeyboard = resources.configuration.keyboard != android.content.res.Configuration.KEYBOARD_NOKEYS
         applyCompactMode()
         applyWindowBackground()
         if (hasHardwareKeyboard) {
@@ -2046,8 +2034,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
-        hasHardwareKeyboard = SettingsPreferences.isHardwareKeyboardDetectionEnabled(this) &&
-            newConfig.keyboard != android.content.res.Configuration.KEYBOARD_NOKEYS
+        hasHardwareKeyboard = newConfig.keyboard != android.content.res.Configuration.KEYBOARD_NOKEYS
         super.onConfigurationChanged(newConfig)
         if (newConfig.screenWidthDp > newConfig.screenHeightDp) {
             closeToolPanel()
@@ -2124,8 +2111,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
 
     private fun applyCompactMode() {
         val current = uiState.value
-        val detectionEnabled = SettingsPreferences.isHardwareKeyboardDetectionEnabled(this)
-        val isCompact = detectionEnabled && hasHardwareKeyboard
+        val isCompact = hasHardwareKeyboard
         FileLogger.i(
             TAG,
             "applyCompactMode: keyboardCfg=${keyboardConfigName(resources.configuration.keyboard)}, " +
