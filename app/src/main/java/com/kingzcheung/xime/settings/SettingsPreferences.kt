@@ -48,6 +48,7 @@ object SettingsPreferences {
     const val KEY_SWIPE_DOWN_HINTS_ENABLED = "swipe_down_hints_enabled"
     const val KEY_SHOW_PRESS_BUBBLE = "show_press_bubble"
     const val KEY_LANDSCAPE_SPLIT_KEYBOARD_ENABLED = "landscape_split_keyboard_enabled"
+    const val KEY_HARDWARE_KEYBOARD_DETECTION_ENABLED = "hardware_keyboard_detection_enabled"
 
     private const val KEY_RIME_INSTALLATION_ID = "rime_installation_id"
 
@@ -72,6 +73,15 @@ object SettingsPreferences {
 
     fun setAutoNumberKeyboardEnabled(context: Context, enabled: Boolean) {
         getPrefs(context).edit().putBoolean(KEY_AUTO_NUMBER_KEYBOARD, enabled).apply()
+    }
+
+    /** 检测到实体键盘时是否启用紧凑候选栏模式，默认开启以保持历史行为。 */
+    fun isHardwareKeyboardDetectionEnabled(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_HARDWARE_KEYBOARD_DETECTION_ENABLED, true)
+    }
+
+    fun setHardwareKeyboardDetectionEnabled(context: Context, enabled: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_HARDWARE_KEYBOARD_DETECTION_ENABLED, enabled).apply()
     }
     
     private const val KEY_LAYOUT_PREFIX = "layout_pref_"

@@ -102,6 +102,42 @@ fun LayoutDisplaySettingsContent(
                             }
                         )
                     }
+
+                    HorizontalDivider(
+                        modifier = Modifier.padding(start = 16.dp),
+                        thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5.dp)
+                    )
+
+                    var hardwareKeyboardDetectionEnabled by remember {
+                        mutableStateOf(SettingsPreferences.isHardwareKeyboardDetectionEnabled(context))
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "实体键盘检测",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "关闭后不检测实体键盘，始终使用屏幕键盘",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = hardwareKeyboardDetectionEnabled,
+                            onCheckedChange = { enabled ->
+                                hardwareKeyboardDetectionEnabled = enabled
+                                SettingsPreferences.setHardwareKeyboardDetectionEnabled(context, enabled)
+                            }
+                        )
+                    }
                 })
             }
 
