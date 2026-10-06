@@ -93,6 +93,34 @@ fun LayoutDisplaySettingsContent(
                         )
                     }
 
+                    var inlineAutofillSuggestionsEnabled by remember {
+                        mutableStateOf(SettingsPreferences.isInlineAutofillSuggestionsEnabled(context))
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "内联自动填充建议",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "控制是否显示密码管理器提供的内联自动填充建议",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = inlineAutofillSuggestionsEnabled,
+                            onCheckedChange = { enabled ->
+                                inlineAutofillSuggestionsEnabled = enabled
+                                SettingsPreferences.setInlineAutofillSuggestionsEnabled(context, enabled)
+                            }
+                        )
+                    }
+
                     var landscapeSplitKeyboardEnabled by remember {
                         mutableStateOf(SettingsPreferences.isLandscapeSplitKeyboardEnabled(context))
                     }
