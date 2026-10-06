@@ -1,0 +1,136 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/ximeiorg/Xime.git
+          git fetch --prune upstream main
+          git fetch --prune origin main
+          git fetch --prune upstream '+refs/tags/*:refs/tags/upstream/*'
+
+      - name: Sync main and record fork-only commits
+        run: |
+          set -euo pipefail
+          git rev-list --reverse upstream/main..HEAD > /tmp/fork-commits-before.txt
+          echo "Fork-only commits before rebase:"
+          cat /tmp/fork-commits-before.txt
+          git rebase upstream/main
+          echo "Fork-only commits after rebase:"
+          git log --oneline upstream/main..HEAD
+          git push --force-with-lease origin HEAD:main
+
+      - name: Select release patches
+        run: |
+          set -euo pipefail
+
+          # Release tags only carry app-level fork patches that are known to be
+          # valid on upstream releases. CI/workflow changes stay on fork main.
+          mapfile -t RELEASE_PATCHES < <(
+            git log --format='%H%x09%s' upstream/main..HEAD |
+            awk -F '\t' '$2 == "feat: add inline autofill suggestions toggle" { print $1 }' |
+            tac
+          )
+
+          if [[ "${#RELEASE_PATCHES[@]}" -ne 1 ]]; then
+            echo "::error::Expected exactly one Autofill release patch, found ${#RELEASE_PATCHES[@]}"
+            git log --oneline upstream/main..HEAD
+            exit 1
+          fi
+
+          printf '%s\n' "${RELEASE_PATCHES[0]}" > /tmp/release-patches.txt
+          echo "Release patch: ${RELEASE_PATCHES[0]}"
+
+      - name: Sync new upstream release tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          BASE_TAG="v3.0.0"
+          mapfile -t RELEASE_PATCHES < /tmp/release-patches.txt
+
+          echo "Release patches to apply:"
+          printf '  %s\n' "${RELEASE_PATCHES[@]}"
+
+          mapfile -t UPSTREAM_TAGS < <(
+            git for-each-ref \
+              --sort='v:refname' \
+              --format='%(refname:short)' \
+              'refs/tags/upstream/v*'
+          )
+
+          for upstream_ref in "${UPSTREAM_TAGS[@]}"; do
+            tag="${upstream_ref#upstream/}"
+
+            if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              continue
+            fi
+
+            if [[ "$(printf '%s\n' "$BASE_TAG" "$tag" | sort -V | head -n1)" == "$tag" ]]; then
+              continue
+            fi
+
+            if git show-ref --verify --quiet "refs/tags/$tag"; then
+              echo "Already exists: $tag"
+              continue
+            fi
+
+            echo "=== Syncing upstream release $tag ==="
+
+            tmp_branch="sync-tag-${tag//./-}"
+            git switch --detach "refs/tags/upstream/$tag"
+            git switch -C "$tmp_branch"
+
+            for commit in "${RELEASE_PATCHES[@]}"; do
+              git cherry-pick "$commit"
+            done
+
+            patched_sha="$(git rev-parse HEAD)"
+            tag_message="$(git for-each-ref --format='%(contents:subject)%n%n%(contents:body)' "refs/tags/upstream/$tag")"
+
+            if [[ -z "$tag_message" ]]; then
+              tag_message="Xime $tag (upstream release + fork patches)"
+            fi
+
+            git tag -a "$tag" "$patched_sha" -m "$tag_message"
+            git push origin "refs/tags/$tag"
+
+            echo "Created $tag -> $patched_sha"
+
+            # Run release CI from fork main; build this exact release tag.
+            gh workflow run release.yml \
+              --repo "${{ github.repository }}" \
+              --ref main \
+              -f release_tag="$tag"
+
+            git switch main
+            git branch -D "$tmp_branch"
+          done
