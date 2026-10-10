@@ -40,12 +40,20 @@ jobs:
         run: |
           set -euo pipefail
           git rev-list --reverse upstream/main..HEAD > /tmp/fork-commits-before.txt
-          echo "Fork-only commits before rebase:"
+          echo "Fork-only commits before merge:"
           cat /tmp/fork-commits-before.txt
-          git rebase upstream/main
-          echo "Fork-only commits after rebase:"
+
+          # Merge upstream instead of rebasing so existing fork commit SHAs
+          # remain stable. Tags are immutable refs and must not be moved.
+          if ! git merge-base --is-ancestor upstream/main HEAD; then
+            git merge --no-edit upstream/main
+          fi
+
+          echo "Fork-only commits after merge:"
           git log --oneline upstream/main..HEAD
-          git push --force-with-lease origin HEAD:main
+
+          # A normal push is sufficient; never force-update main during sync.
+          git push origin HEAD:main
 
       - name: Select release patches
         run: |
