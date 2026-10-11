@@ -32,9 +32,11 @@ jobs:
       - name: Fetch upstream
         run: |
           git remote add upstream https://github.com/ximeiorg/Xime.git
-          git fetch --prune upstream main
-          git fetch --prune origin main
-          git fetch --prune upstream '+refs/tags/*:refs/tags/upstream/*'
+          # Do not auto-follow upstream tags into refs/tags/<tag>: those names
+          # belong to this fork's release tags and can collide with upstream.
+          git fetch --no-tags --prune upstream main
+          git fetch --no-tags --prune origin main
+          git fetch --no-tags upstream '+refs/tags/*:refs/tags/upstream/*'
 
       - name: Sync main and record fork-only commits
         run: |
@@ -106,9 +108,18 @@ jobs:
               continue
             fi
 
-            if git show-ref --verify --quiet "refs/tags/$tag"; then
-              echo "Already exists: $tag"
+            # Check the fork's remote, not local refs: upstream tags are fetched
+            # into refs/tags/upstream/* and must not suppress fork tag creation.
+            set +e
+            git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null
+            tag_check_status=$?
+            set -e
+            if [[ "$tag_check_status" -eq 0 ]]; then
+              echo "Already exists on origin: $tag"
               continue
+            elif [[ "$tag_check_status" -ne 2 ]]; then
+              echo "::error::Could not check whether $tag exists on origin (git ls-remote exit $tag_check_status)"
+              exit "$tag_check_status"
             fi
 
             echo "=== Syncing upstream release $tag ==="
