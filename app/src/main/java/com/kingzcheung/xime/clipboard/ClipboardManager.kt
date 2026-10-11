@@ -515,7 +515,9 @@ class ClipboardManager private constructor(private val context: Context) {
                     }
                 }
                 val discovered = entries.map { it.groupName.trim() }.filter { it.isNotEmpty() }
-                if (discovered.isNotEmpty()) persistQuickSendGroups(_quickSendGroups.value + discovered)
+                if (discovered.isNotEmpty() && prefs.getString(KEY_QUICK_SEND_GROUPS, "").isNullOrBlank()) {
+                    persistQuickSendGroups(_quickSendGroups.value + discovered)
+                }
             }
         }
         scope.launch {
