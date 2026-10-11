@@ -1,0 +1,203 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          # Use a PAT instead of the default GITHUB_TOKEN: pushes made with
+          # GITHUB_TOKEN do not trigger other workflows, so the tag push below
+          # would never start release.yml. SYNC_PAT needs Contents: read/write.
+          # persist-credentials=false keeps the token out of .git/config; we
+          # inject it explicitly only for the push commands that need it.
+          token: ${{ secrets.SYNC_PAT }}
+          persist-credentials: false
+
+      - name: Verify SYNC_PAT is configured
+        env:
+          SYNC_PAT: ${{ secrets.SYNC_PAT }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SYNC_PAT:-}" ]]; then
+            echo "::error::SYNC_PAT secret is not set. Add a PAT with Contents: read/write."
+            exit 1
+          fi
+
+      - name: Configure Git
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        env:
+          SYNC_PAT: ${{ secrets.SYNC_PAT }}
+        run: |
+          set -euo pipefail
+
+          # Idempotent remote setup: re-running the workflow must not fail on
+          # an already-existing upstream remote.
+          if git remote get-url upstream >/dev/null 2>&1; then
+            git remote set-url upstream https://github.com/ximeiorg/Xime.git
+          else
+            git remote add upstream https://github.com/ximeiorg/Xime.git
+          fi
+
+          # Authenticated origin URL, scoped to this step only. Never echo it.
+          git remote set-url origin \
+            "https://x-access-token:${SYNC_PAT}@github.com/${{ github.repository }}.git"
+
+          # Keep upstream tags in a separate namespace so they cannot shadow
+          # this fork's release tags.
+          git fetch --no-tags --prune upstream main
+          git fetch --no-tags --prune origin main
+          git fetch --no-tags upstream '+refs/tags/*:refs/tags/upstream/*'
+
+      - name: Sync main
+        run: |
+          set -euo pipefail
+
+          echo "Fork-only commits before merge:"
+          git log --oneline --decorate upstream/main..HEAD || true
+
+          # Merge, never rebase: preserve existing fork commit SHAs and tags.
+          if ! git merge-base --is-ancestor upstream/main HEAD; then
+            git merge --no-edit upstream/main
+          else
+            echo "Fork main already contains upstream main."
+          fi
+
+          echo "Fork-only commits after merge:"
+          git log --oneline upstream/main..HEAD || true
+
+          # Never force-update main.
+          if ! git push origin HEAD:main; then
+            echo "::error::Failed to push main. Check SYNC_PAT permissions (Contents: write)."
+            exit 1
+          fi
+
+      - name: Select release patches
+        run: |
+          set -euo pipefail
+
+          # Only app-level patches should be applied to upstream release tags.
+          # Workflow/CI maintenance commits stay on fork main.
+          mapfile -t RELEASE_PATCHES < <(
+            git log --format='%H%x09%s' upstream/main..HEAD |
+            awk -F '\t' '$2 == "feat: add inline autofill suggestions toggle" { print $1 }' |
+            tac
+          )
+
+          if [[ "${#RELEASE_PATCHES[@]}" -ne 1 ]]; then
+            echo "::error::Expected exactly one fork app patch for release tags; found ${#RELEASE_PATCHES[@]}."
+            echo "Fork-only commits:"
+            git log --oneline upstream/main..HEAD
+            echo "If upstream has incorporated this feature, update the patch-selection logic instead of publishing an unpatched release."
+            exit 1
+          fi
+
+          printf '%s\n' "${RELEASE_PATCHES[0]}" > /tmp/release-patches.txt
+          echo "Selected release patch: ${RELEASE_PATCHES[0]}"
+
+      - name: Sync new upstream release tags
+        run: |
+          set -euo pipefail
+
+          BASE_TAG="v3.0.0"
+          mapfile -t RELEASE_PATCHES < /tmp/release-patches.txt
+          echo "Release patches to apply:"
+          printf '  %s\n' "${RELEASE_PATCHES[@]}"
+
+          mapfile -t UPSTREAM_TAGS < <(
+            git for-each-ref \
+              --sort='v:refname' \
+              --format='%(refname:short)' \
+              'refs/tags/upstream/v*'
+          )
+
+          for upstream_ref in "${UPSTREAM_TAGS[@]}"; do
+            tag="${upstream_ref#upstream/}"
+
+            # Sync stable semantic-version tags only.
+            if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              continue
+            fi
+
+            # v3.0.0 is the immutable baseline and must never be recreated.
+            if [[ "$(printf '%s\n' "$BASE_TAG" "$tag" | sort -V | head -n1)" == "$tag" ]]; then
+              continue
+            fi
+
+            # Check the fork remote, not local refs: upstream tags are stored
+            # under refs/tags/upstream/* and must not suppress fork tag creation.
+            set +e
+            git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null
+            tag_check_status=$?
+            set -e
+            if [[ "$tag_check_status" -eq 0 ]]; then
+              echo "Already exists on origin: $tag"
+              continue
+            elif [[ "$tag_check_status" -ne 2 ]]; then
+              echo "::error::Could not check whether $tag exists on origin (git ls-remote exit $tag_check_status)"
+              exit "$tag_check_status"
+            fi
+
+            echo "=== Syncing upstream release $tag ==="
+            tmp_branch="sync-tag-${tag//./-}"
+
+            # Always start from the exact upstream release tag.
+            git switch --detach "refs/tags/upstream/$tag"
+            git switch -C "$tmp_branch"
+
+            for commit in "${RELEASE_PATCHES[@]}"; do
+              git cherry-pick "$commit"
+            done
+
+            patched_sha="$(git rev-parse HEAD)"
+            tag_message="$(git for-each-ref --format='%(contents:subject)%n%n%(contents:body)' "refs/tags/upstream/$tag")"
+            if [[ -z "$tag_message" ]]; then
+              tag_message="Xime $tag (upstream release + fork patches)"
+            fi
+
+            # Pushing this new v*.*.* tag is intended to trigger the release
+            # workflow in the fork. Because this push uses SYNC_PAT (configured
+            # on origin in the Fetch step), it is not suppressed by GitHub's
+            # GITHUB_TOKEN recursion guard, so release.yml will actually run.
+            git tag -a "$tag" "$patched_sha" -m "$tag_message"
+            if ! git push origin "refs/tags/$tag"; then
+              echo "::error::Failed to push tag $tag. Check SYNC_PAT permissions."
+              exit 1
+            fi
+            echo "Created $tag -> $patched_sha"
+
+            git switch main
+            git branch -D "$tmp_branch"
+          done
+
+          echo "Upstream release tag sync completed."
+
+      - name: Clean up credentials
+        if: always()
+        run: |
+          # Remove the PAT-bearing origin URL so it cannot leak via later
+          # steps, artifacts, or post-job diagnostics.
+          git remote set-url origin \
+            "https://github.com/${{ github.repository }}.git" || true
