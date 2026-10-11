@@ -657,4 +657,16 @@ class KeyboardViewModel(application: Application) : AndroidViewModel(application
     fun togglePinQuickSend(id: Long) {
         clipboardManager.togglePinQuickSend(id)
     }
+
+    val quickSendGroups: StateFlow<List<String>> = clipboardManager.quickSendGroups
+
+    fun createQuickSendGroup(name: String): Boolean = clipboardManager.createQuickSendGroup(name)
+
+    fun renameQuickSendGroup(oldName: String, newName: String): Boolean =
+        clipboardManager.renameQuickSendGroup(oldName, newName)
+
+    fun deleteQuickSendGroup(name: String): Boolean = clipboardManager.deleteQuickSendGroup(name)
+
+    fun moveQuickSendItemToGroup(id: Long, groupName: String) =
+        clipboardManager.moveQuickSendItemToGroup(id, groupName)
 }
