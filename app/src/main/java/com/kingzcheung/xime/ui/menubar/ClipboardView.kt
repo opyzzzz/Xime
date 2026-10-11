@@ -143,6 +143,7 @@ fun ClipboardView(
     BoxWithConstraints(modifier = modifier) {
         val isWide = maxWidth >= WIDE_CONTAINER_WIDTH
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -173,7 +174,6 @@ fun ClipboardView(
             Spacer(modifier = Modifier.width(8.dp))
 
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     @Composable
                     fun TabChip(label: String, selected: Boolean, onClick: () -> Unit, onLongClick: (() -> Unit)? = null) {
                         Box(
@@ -187,6 +187,7 @@ fun ClipboardView(
                                 fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     TabChip("剪贴板", selectedTab == 0, { onClipboardTabChange?.invoke(0) })
                     TabChip("快捷发送", selectedTab == 1, { selectedQuickSendGroup = "默认分组"; onClipboardTabChange?.invoke(1) })
                 }
@@ -393,6 +394,7 @@ fun ClipboardView(
         }
 
         Spacer(modifier = Modifier.height(if (isWide) 15.dp else bottomPaddingDp.dp))
+    }
 
         menuAnchor?.let { anchor ->
             val menuItems = if (anchor.tab == 0) {
