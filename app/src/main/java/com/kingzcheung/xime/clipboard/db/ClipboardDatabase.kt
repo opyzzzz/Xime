@@ -13,7 +13,7 @@ import kotlinx.coroutines.SupervisorJob
 
 @Database(
     entities = [ClipboardEntry::class],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class ClipboardDatabase : RoomDatabase() {
@@ -64,6 +64,15 @@ abstract class ClipboardDatabase : RoomDatabase() {
             }
         }
 
+        /** v4 → v5：快捷发送条目增加分组名，既有条目归入默认分组。 */
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.prepare(
+                    "ALTER TABLE clipboard_entries ADD COLUMN groupName TEXT NOT NULL DEFAULT ''"
+                ).step()
+            }
+        }
+
         @Volatile
         private var instance: ClipboardDatabase? = null
 
@@ -75,7 +84,7 @@ abstract class ClipboardDatabase : RoomDatabase() {
                 )
                     .setDriver(AndroidSQLiteDriver())
                     .setQueryCoroutineContext(Dispatchers.IO)
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build()
                     .also { instance = it }
             }
