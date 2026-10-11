@@ -144,6 +144,9 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
+          # workflow_dispatch runs on a branch ref, even when checkout uses a tag.
+          # Explicitly tell the action which tag this release belongs to.
+          tag_name: ${{ inputs.release_tag }}
           name: Xime ${{ steps.get_version.outputs.VERSION }}
           generate_release_notes: false
           files: |
