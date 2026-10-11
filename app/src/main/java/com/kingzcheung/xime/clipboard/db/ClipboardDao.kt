@@ -100,6 +100,15 @@ interface ClipboardDao {
     @Query("UPDATE clipboard_entries SET text = :text, code = :code, timestamp = :now WHERE id = :id")
     suspend fun updateQuickSendItem(id: Long, text: String, code: String, now: Long)
 
+    @Query("UPDATE clipboard_entries SET groupName = :groupName WHERE id = :id AND isQuickSend = 1")
+    suspend fun updateQuickSendGroup(id: Long, groupName: String)
+
+    @Query("UPDATE clipboard_entries SET groupName = :newName WHERE isQuickSend = 1 AND groupName = :oldName")
+    suspend fun renameQuickSendGroup(oldName: String, newName: String)
+
+    @Query("UPDATE clipboard_entries SET groupName = :targetName WHERE isQuickSend = 1 AND groupName = :sourceName")
+    suspend fun moveQuickSendGroup(sourceName: String, targetName: String)
+
     @Query("UPDATE clipboard_entries SET consumed = 1 WHERE id = :id")
     suspend fun markConsumed(id: Long)
 
@@ -153,7 +162,8 @@ interface ClipboardDao {
                     text = source.text,
                     timestamp = now,
                     isPinned = true,
-                    isQuickSend = true
+                    isQuickSend = true,
+                    groupName = "默认分组"
                 )
             )
         }
@@ -178,7 +188,8 @@ interface ClipboardDao {
                     code = code,
                     timestamp = now,
                     isPinned = true,
-                    isQuickSend = true
+                    isQuickSend = true,
+                    groupName = "默认分组"
                 )
             )
         }
