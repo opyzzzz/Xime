@@ -22,9 +22,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -175,73 +172,38 @@ fun ClipboardView(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            Row(
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .horizontalScroll(rememberScrollState()),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                @Composable
-                fun TabChip(label: String, selected: Boolean, onClick: () -> Unit, onLongClick: (() -> Unit)? = null) {
-                    Box(
-                        modifier = Modifier
-                            .padding(end = 4.dp)
-                            .height(28.dp)
-                            .clip(RoundedCornerShape(11.dp))
-                            .background(if (selected) accentColor else iconButtonContainer)
-                            .then(
-                                if (onLongClick != null) Modifier.combinedClickable(
-                                    onClick = onClick,
-                                    onLongClick = onLongClick
-                                ) else Modifier.clickable(onClick = onClick)
-                            )
-                            .padding(horizontal = 10.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = label,
-                            color = if (selected) Color.White else textColor,
-                            fontSize = 11.sp,
-                            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    @Composable
+                    fun TabChip(label: String, selected: Boolean, onClick: () -> Unit, onLongClick: (() -> Unit)? = null) {
+                        Box(
+                            modifier = Modifier.padding(end = 4.dp).height(28.dp).clip(RoundedCornerShape(11.dp))
+                                .background(if (selected) accentColor else iconButtonContainer)
+                                .then(if (onLongClick != null) Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick) else Modifier.clickable(onClick = onClick))
+                                .padding(horizontal = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(label, color = if (selected) Color.White else textColor, fontSize = 11.sp,
+                                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
+                    TabChip("剪贴板", selectedTab == 0, { onClipboardTabChange?.invoke(0) })
+                    TabChip("快捷发送", selectedTab == 1, { selectedQuickSendGroup = "默认分组"; onClipboardTabChange?.invoke(1) })
                 }
-                TabChip("剪贴板", selectedTab == 0, { onClipboardTabChange?.invoke(0) })
-                TabChip("快捷发送", selectedTab == 1 && selectedQuickSendGroup == "默认分组", {
-                    selectedQuickSendGroup = "默认分组"
-                    onClipboardTabChange?.invoke(1)
-                })
-                if (selectedTab == 1) {
-                    quickSendGroups.filter { it != "默认分组" }.forEach { group ->
-                        TabChip(group, selectedQuickSendGroup == group, {
-                            selectedQuickSendGroup = group
-                            onClipboardTabChange?.invoke(1)
-                        }, onLongClick = {
-                            renameGroupTarget = group
-                            groupNameInput = group
-                        })
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Row(modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                        quickSendGroups.forEach { group ->
+                            TabChip(group, selectedTab == 1 && selectedQuickSendGroup == group, {
+                                selectedQuickSendGroup = group; onClipboardTabChange?.invoke(1)
+                            }, onLongClick = if (group == "默认分组") null else ({ renameGroupTarget = group; groupNameInput = group }))
+                        }
                     }
-                    Box(
-                        modifier = Modifier
-                            .padding(end = 4.dp)
-                            .size(28.dp)
-                            .clip(CircleShape)
-                            .background(iconButtonContainer)
-                            .clickable {
-                                groupNameInput = ""
-                                showCreateGroupDialog = true
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = "新建分组", tint = accentColor, modifier = Modifier.size(18.dp))
+                    Box(modifier = Modifier.padding(start = 4.dp).size(32.dp).clip(CircleShape).background(iconButtonContainer)
+                        .clickable { groupNameInput = ""; showCreateGroupDialog = true }, contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Add, contentDescription = "新建分组", tint = accentColor, modifier = Modifier.size(20.dp))
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.weight(1f))
-
             if (selectedTab == 0) {
                 if (isMultiSelect) {
                     Box(
@@ -539,64 +501,33 @@ fun ClipboardView(
             )
         }
 
-        if (showCreateGroupDialog) {
-            AlertDialog(
-                onDismissRequest = { showCreateGroupDialog = false },
-                title = { Text("新建快捷发送分组") },
-                text = {
-                    OutlinedTextField(
-                        value = groupNameInput,
-                        onValueChange = { groupNameInput = it },
-                        label = { Text("分组名称") },
-                        singleLine = true
-                    )
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        if (viewModel.createQuickSendGroup(groupNameInput)) {
-                            selectedQuickSendGroup = groupNameInput.trim()
-                            onClipboardTabChange?.invoke(1)
-                            showCreateGroupDialog = false
+        if (showCreateGroupDialog || renameGroupTarget != null) {
+            val oldName = renameGroupTarget
+            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)).clickable {
+                showCreateGroupDialog = false; renameGroupTarget = null
+            }, contentAlignment = Alignment.Center) {
+                Surface(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).clickable(enabled = false) {},
+                    shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface, tonalElevation = 6.dp) {
+                    Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(if (oldName == null) "新建快捷发送分组" else "重命名分组", color = MaterialTheme.colorScheme.onSurface, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                        androidx.compose.material3.OutlinedTextField(value = groupNameInput, onValueChange = { groupNameInput = it },
+                            label = { Text("分组名称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                            if (oldName != null) Text("删除", color = MaterialTheme.colorScheme.error, modifier = Modifier.clickable {
+                                if (viewModel.deleteQuickSendGroup(oldName)) { selectedQuickSendGroup = "默认分组"; renameGroupTarget = null }
+                            }.padding(horizontal = 12.dp, vertical = 10.dp))
+                            Text("取消", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable {
+                                showCreateGroupDialog = false; renameGroupTarget = null
+                            }.padding(horizontal = 12.dp, vertical = 10.dp))
+                            Text(if (oldName == null) "创建" else "保存", color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable {
+                                val ok = if (oldName == null) viewModel.createQuickSendGroup(groupNameInput) else viewModel.renameQuickSendGroup(oldName, groupNameInput)
+                                if (ok) { selectedQuickSendGroup = groupNameInput.trim(); onClipboardTabChange?.invoke(1); showCreateGroupDialog = false; renameGroupTarget = null }
+                            }.padding(start = 12.dp, end = 4.dp, top = 10.dp, bottom = 10.dp))
                         }
-                    }) { Text("创建") }
-                },
-                dismissButton = { TextButton(onClick = { showCreateGroupDialog = false }) { Text("取消") } }
-            )
-        }
-        renameGroupTarget?.let { oldName ->
-            AlertDialog(
-                onDismissRequest = { renameGroupTarget = null },
-                title = { Text("重命名分组") },
-                text = {
-                    OutlinedTextField(
-                        value = groupNameInput,
-                        onValueChange = { groupNameInput = it },
-                        label = { Text("分组名称") },
-                        singleLine = true
-                    )
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        if (viewModel.renameQuickSendGroup(oldName, groupNameInput)) {
-                            selectedQuickSendGroup = groupNameInput.trim()
-                            renameGroupTarget = null
-                        }
-                    }) { Text("保存") }
-                },
-                dismissButton = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = {
-                            if (viewModel.deleteQuickSendGroup(oldName)) {
-                                selectedQuickSendGroup = "默认分组"
-                                renameGroupTarget = null
-                            }
-                        }) { Text("删除分组") }
-                        TextButton(onClick = { renameGroupTarget = null }) { Text("取消") }
                     }
                 }
-            )
+            }
         }
-
         previewItem?.let { item ->
             // 文件可能已被配额淘汰/手动清理：拿不到则静默不弹（不在组合期改写状态）
             imageFileOf?.invoke(item)?.let { file ->
