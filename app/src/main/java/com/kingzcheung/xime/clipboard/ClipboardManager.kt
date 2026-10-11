@@ -73,6 +73,7 @@ class ClipboardManager private constructor(private val context: Context) {
         private const val PREFS_NAME = "clipboard_prefs"
         private const val KEY_CLIPBOARD_ITEMS = "clipboard_items"
         private const val KEY_QUICK_SEND_ITEMS = "quick_send_items"
+        private const val KEY_QUICK_SEND_GROUPS = "quick_send_groups"
 
         /** 拒收提示（图片过大/尺寸过大）的去重窗口，避免连续复制时连环弹 Toast。 */
         private const val REJECT_TOAST_INTERVAL_MS = 10_000L
@@ -484,6 +485,10 @@ class ClipboardManager private constructor(private val context: Context) {
     private val _quickSendItems = MutableStateFlow<List<ClipboardItem>>(emptyList())
     val quickSendItems: StateFlow<List<ClipboardItem>> = _quickSendItems.asStateFlow()
 
+    private val _quickSendGroups = MutableStateFlow(listOf(DEFAULT_QUICK_SEND_GROUP))
+    /** 分组名称持久化在轻量偏好设置中；条目仍保存在现有 Room 表。 */
+    val quickSendGroups: StateFlow<List<String>> = _quickSendGroups.asStateFlow()
+
     private val _recentItems = MutableStateFlow<List<ClipboardItem>>(emptyList())
     val recentItems: StateFlow<List<ClipboardItem>> = _recentItems.asStateFlow()
 
@@ -495,6 +500,7 @@ class ClipboardManager private constructor(private val context: Context) {
 
     init {
         migrateLegacyData()
+        loadQuickSendGroups()
         scope.launch {
             dao.observeAll().collect { entries ->
                 _clipboardItems.value = entries.map { it.toClipboardItem() }
@@ -503,7 +509,13 @@ class ClipboardManager private constructor(private val context: Context) {
         }
         scope.launch {
             dao.observeQuickSend().collect { entries ->
-                _quickSendItems.value = entries.map { it.toClipboardItem() }
+                _quickSendItems.value = entries.map { entry ->
+                    entry.toClipboardItem().let { item ->
+                        if (item.groupName.isBlank()) item.copy(groupName = DEFAULT_QUICK_SEND_GROUP) else item
+                    }
+                }
+                val discovered = entries.map { it.groupName.trim() }.filter { it.isNotEmpty() }
+                if (discovered.isNotEmpty()) persistQuickSendGroups(_quickSendGroups.value + discovered)
             }
         }
         scope.launch {
@@ -609,7 +621,8 @@ class ClipboardManager private constructor(private val context: Context) {
             mimeType = mimeType,
             sizeBytes = sizeBytes,
             width = width,
-            height = height
+            height = height,
+            groupName = groupName
         )
     }
 
@@ -729,19 +742,52 @@ class ClipboardManager private constructor(private val context: Context) {
         }
     }
 
+    private fun loadQuickSendGroups() {
+        val stored = prefs.getStringSet(KEY_QUICK_SEND_GROUPS, emptySet()).orEmpty()
+        _quickSendGroups.value = (listOf(DEFAULT_QUICK_SEND_GROUP) + stored)
+            .map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+    }
+
+    private fun persistQuickSendGroups(groups: List<String>) {
+        val normalized = (listOf(DEFAULT_QUICK_SEND_GROUP) + groups)
+            .map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        _quickSendGroups.value = normalized
+        prefs.edit().putStringSet(KEY_QUICK_SEND_GROUPS, normalized.toSet()).apply()
+    }
+
+    fun createQuickSendGroup(name: String): Boolean {
+        val normalized = name.trim()
+        if (normalized.isEmpty() || _quickSendGroups.value.any { it.equals(normalized, ignoreCase = true) }) return false
+        persistQuickSendGroups(_quickSendGroups.value + normalized)
+        return true
+    }
+
+    fun renameQuickSendGroup(oldName: String, newName: String): Boolean {
+        val old = oldName.trim()
+        val new = newName.trim()
+        if (old.isEmpty() || new.isEmpty() || old == DEFAULT_QUICK_SEND_GROUP ||
+            _quickSendGroups.value.none { it == old } ||
+            _quickSendGroups.value.any { it != old && it.equals(new, ignoreCase = true) }
+        ) return false
+        scope.launch { dao.renameQuickSendGroup(old, new) }
+        persistQuickSendGroups(_quickSendGroups.value.map { if (it == old) new else it })
+        return true
+    }
+
+    fun deleteQuickSendGroup(name: String): Boolean {
+        val normalized = name.trim()
+        if (normalized.isEmpty() || normalized == DEFAULT_QUICK_SEND_GROUP ||
+            _quickSendGroups.value.none { it == normalized }
+        ) return false
+        scope.launch { dao.moveQuickSendGroup(normalized, DEFAULT_QUICK_SEND_GROUP) }
+        persistQuickSendGroups(_quickSendGroups.value - normalized)
+        return true
+    }
+
     /** 将快捷发送条目移动到指定分组。 */
     fun moveQuickSendItemToGroup(id: Long, groupName: String) {
         val normalized = groupName.trim().ifEmpty { DEFAULT_QUICK_SEND_GROUP }
         scope.launch { dao.updateQuickSendGroup(id, normalized) }
-    }
-
-    /** 重命名快捷发送分组；条目以分组名关联，批量更新后即刻生效。 */
-    fun renameQuickSendGroup(oldName: String, newName: String): Boolean {
-        val old = oldName.trim()
-        val new = newName.trim()
-        if (old.isEmpty() || new.isEmpty()) return false
-        scope.launch { dao.renameQuickSendGroup(old, new) }
-        return true
     }
 
     fun removeFromQuickSend(id: Long) {
