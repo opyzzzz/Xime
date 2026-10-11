@@ -743,7 +743,8 @@ class ClipboardManager private constructor(private val context: Context) {
     }
 
     private fun loadQuickSendGroups() {
-        val stored = prefs.getStringSet(KEY_QUICK_SEND_GROUPS, emptySet()).orEmpty()
+        val stored = prefs.getString(KEY_QUICK_SEND_GROUPS, "").orEmpty()
+            .split('\u001F').filter { it.isNotBlank() }
         _quickSendGroups.value = (listOf(DEFAULT_QUICK_SEND_GROUP) + stored)
             .map { it.trim() }.filter { it.isNotEmpty() }.distinct()
     }
@@ -752,12 +753,12 @@ class ClipboardManager private constructor(private val context: Context) {
         val normalized = (listOf(DEFAULT_QUICK_SEND_GROUP) + groups)
             .map { it.trim() }.filter { it.isNotEmpty() }.distinct()
         _quickSendGroups.value = normalized
-        prefs.edit().putStringSet(KEY_QUICK_SEND_GROUPS, normalized.toSet()).apply()
+        prefs.edit().putString(KEY_QUICK_SEND_GROUPS, normalized.joinToString("\\u001F")).apply()
     }
 
     fun createQuickSendGroup(name: String): Boolean {
         val normalized = name.trim()
-        if (normalized.isEmpty() || _quickSendGroups.value.any { it.equals(normalized, ignoreCase = true) }) return false
+        if (normalized.isEmpty() || '\u001F' in normalized || _quickSendGroups.value.any { it.equals(normalized, ignoreCase = true) }) return false
         persistQuickSendGroups(_quickSendGroups.value + normalized)
         return true
     }
@@ -765,7 +766,7 @@ class ClipboardManager private constructor(private val context: Context) {
     fun renameQuickSendGroup(oldName: String, newName: String): Boolean {
         val old = oldName.trim()
         val new = newName.trim()
-        if (old.isEmpty() || new.isEmpty() || old == DEFAULT_QUICK_SEND_GROUP ||
+        if (old.isEmpty() || new.isEmpty() || '\u001F' in new || old == DEFAULT_QUICK_SEND_GROUP ||
             _quickSendGroups.value.none { it == old } ||
             _quickSendGroups.value.any { it != old && it.equals(new, ignoreCase = true) }
         ) return false
