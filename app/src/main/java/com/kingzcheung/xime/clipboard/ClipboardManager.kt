@@ -51,6 +51,7 @@ data class ClipboardItem(
     val sizeBytes: Long = 0,
     val width: Int = 0,
     val height: Int = 0,
+    val groupName: String = "",
 ) {
     val isImage: Boolean get() = type == ClipboardEntry.TYPE_IMAGE
 }
@@ -68,6 +69,7 @@ class ClipboardManager private constructor(private val context: Context) {
         private const val TAG = "ClipboardManager"
         private const val MAX_ITEMS = 1000
         private const val MAX_QUICK_SEND_ITEMS = 20
+        const val DEFAULT_QUICK_SEND_GROUP = "默认分组"
         private const val PREFS_NAME = "clipboard_prefs"
         private const val KEY_CLIPBOARD_ITEMS = "clipboard_items"
         private const val KEY_QUICK_SEND_ITEMS = "quick_send_items"
@@ -626,7 +628,8 @@ class ClipboardManager private constructor(private val context: Context) {
             mimeType = mimeType,
             sizeBytes = sizeBytes,
             width = width,
-            height = height
+            height = height,
+            groupName = groupName
         )
     }
 
@@ -724,6 +727,21 @@ class ClipboardManager private constructor(private val context: Context) {
         scope.launch {
             dao.addQuickSend(id, System.currentTimeMillis(), MAX_QUICK_SEND_ITEMS)
         }
+    }
+
+    /** 将快捷发送条目移动到指定分组。 */
+    fun moveQuickSendItemToGroup(id: Long, groupName: String) {
+        val normalized = groupName.trim().ifEmpty { DEFAULT_QUICK_SEND_GROUP }
+        scope.launch { dao.updateQuickSendGroup(id, normalized) }
+    }
+
+    /** 重命名快捷发送分组；条目以分组名关联，批量更新后即刻生效。 */
+    fun renameQuickSendGroup(oldName: String, newName: String): Boolean {
+        val old = oldName.trim()
+        val new = newName.trim()
+        if (old.isEmpty() || new.isEmpty()) return false
+        scope.launch { dao.renameQuickSendGroup(old, new) }
+        return true
     }
 
     fun removeFromQuickSend(id: Long) {
