@@ -753,7 +753,7 @@ class ClipboardManager private constructor(private val context: Context) {
         val normalized = (listOf(DEFAULT_QUICK_SEND_GROUP) + groups)
             .map { it.trim() }.filter { it.isNotEmpty() }.distinct()
         _quickSendGroups.value = normalized
-        prefs.edit().putString(KEY_QUICK_SEND_GROUPS, normalized.joinToString("\\u001F")).apply()
+        prefs.edit().putString(KEY_QUICK_SEND_GROUPS, normalized.joinToString("\u001F")).apply()
     }
 
     fun createQuickSendGroup(name: String): Boolean {
