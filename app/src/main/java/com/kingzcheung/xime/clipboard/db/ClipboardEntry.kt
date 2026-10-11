@@ -33,6 +33,8 @@ data class ClipboardEntry(
     @ColumnInfo(defaultValue = "0") val sizeBytes: Long = 0,
     @ColumnInfo(defaultValue = "0") val width: Int = 0,
     @ColumnInfo(defaultValue = "0") val height: Int = 0,
+    /** 快捷发送分组名称；剪贴板历史条目保持空值。 */
+    @ColumnInfo(defaultValue = "") val groupName: String = "",
 ) {
     companion object {
         const val TYPE_TEXT = "text"
