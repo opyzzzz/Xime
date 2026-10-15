@@ -193,13 +193,18 @@ internal fun parseKeyBinding(
 }
 
 /**
- * 解析 long_press。统一为一种形式：`{ display?, values: [...] }`。
+ * 解析 long_press。支持两种写法：`{ display?, values: [...] }` 与单项直写 `{ action?, value?, ... }`。
  *
  * - [display] 缺省为 `bubble`（长按弹出气泡滑动选择）；设为 `key` 则显示在键面，不弹气泡；
- * - [values] 为候选动作列表（单动作也写成单元素列表）。
+ * - [values] 为候选动作列表（单动作也写成单元素列表）；
+ * - 不写 `values` 而直接给 `action`/`value`/`label`/`icon`/`use` 时，等价于只含这一项的列表；
+ *   配合 `bubble: false` 即为「不弹气泡、长按直接执行该动作」。
  */
 /** 长按气泡最多展示的候选数（气泡按此宽度布局）。 */
 private const val MAX_LONG_PRESS_VALUES = 10
+
+/** long_press 单项直写形式（不写 `values`）认可的字段。 */
+private val LONG_PRESS_DIRECT_FIELDS = setOf("action", "value", "label", "icon", "use")
 
 private fun parseLongPress(
     node: com.charleskorn.kaml.YamlNode,
@@ -211,7 +216,16 @@ private fun parseLongPress(
         }
         return null
     }
-    val valuesNode = node.opt<YamlList>("values") ?: return null
+    val valuesNode = node.opt<YamlList>("values")
+    if (valuesNode == null) {
+        // 单项直写：long_press: { action: "voice", value: "5", bubble: false }
+        val fields = node.entries.keys.mapNotNull { (it as? YamlScalar)?.content }.toSet()
+        if (fields.none { it in LONG_PRESS_DIRECT_FIELDS }) return null
+        return LongPressAction(
+            display = DisplayMode.BUBBLE,
+            values = listOf(parseKeyAction(node, GestureAction.COMMIT, presets)),
+        )
+    }
     var display = node.opt<YamlScalar>("display")?.content
         ?.let { DisplayMode.fromValue(it) }
         ?: DisplayMode.BUBBLE
@@ -230,6 +244,9 @@ private fun parseLongPress(
     val values = valuesNode.items.map { parseKeyAction(it, GestureAction.COMMIT, presets) }.take(MAX_LONG_PRESS_VALUES)
     if (values.any { it.label.ifEmpty { it.value }.isEmpty() }) {
         Log.w("KeysConfigHelper", "long_press 存在既无 label 也无 value 的项：该项无法在气泡中展示，也不会生效")
+    }
+    if (values.size > 1 && values.any { !it.bubble }) {
+        Log.w("KeysConfigHelper", "long_press 多项时不支持 bubble: false（会让该项无法选中），已忽略")
     }
     return LongPressAction(
         display = display,
@@ -929,6 +946,45 @@ object KeysConfigHelper {
     // 主线程 ~1.8s，而输入法服务重建时配置通常未变。内置 xime.yaml 随 APK 更新（进程重启）
     // 天然失效；外部改动 custom 文件经 mtime 感知穿透；解析失败不缓存下次重试。
     private var _loadedCustomStamp: Pair<Long, Long>? = null
+
+    // 纠错绑定列表及其缓存戳（correction.schemas，独立于全量解析——该查询在按键
+    // 热路径调用，只解析顶层一个列表，开销远小于 loadXimeConfig 全量解析）。
+    private var _correctionSchemas: Set<String> = emptySet()
+    private var _correctionSchemasStamp: Pair<Long, Long>? = null
+
+    /**
+     * 启用邻键误触纠错的方案 id 集合（xime.yaml 顶层 correction.schemas，
+     * xime.custom.yaml 同路径追加，与内置取并集）。解析失败/未配置时为空集。
+     */
+    fun correctionSchemas(context: Context): Set<String> {
+        val customFile = File(context.filesDir, "rime/$XIME_CUSTOM_CONFIG_FILE")
+        val stamp = if (customFile.exists()) {
+            customFile.lastModified() to customFile.length()
+        } else {
+            0L to 0L
+        }
+        if (_correctionSchemasStamp == stamp) return _correctionSchemas
+        _correctionSchemasStamp = stamp
+        val builtIn = readAssetText(context, XIME_CONFIG_FILE)
+            ?.let { parseTopLevelSchemasYamlText(it, "correction") } ?: emptySet()
+        val custom = readCustomText(context)
+            ?.let { parseTopLevelSchemasYamlText(it, "correction") } ?: emptySet()
+        _correctionSchemas = builtIn + custom
+        return _correctionSchemas
+    }
+
+    /** 从 YAML 文本提取顶层 `<section>.schemas` 列表（如 correction.schemas）。 */
+    internal fun parseTopLevelSchemasYamlText(yamlText: String, section: String): Set<String> {
+        return try {
+            val root = yaml.parseToYamlNode(yamlText) as? YamlMap ?: return emptySet()
+            val sectionNode = root.opt<YamlMap>(section) ?: return emptySet()
+            val schemas = sectionNode.opt<YamlList>("schemas") ?: return emptySet()
+            schemas.items.mapNotNull { (it as? YamlScalar)?.content?.trim()?.takeIf(String::isNotEmpty) }.toSet()
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse $section schemas", e)
+            emptySet()
+        }
+    }
 
     private fun loadXimeConfig(context: Context) {
         val customFile = File(context.filesDir, "rime/$XIME_CUSTOM_CONFIG_FILE")
@@ -2079,19 +2135,27 @@ object KeysConfigHelper {
     /**
      * 长按气泡的显示项文本：`label` 为空时回退 `value`；两者皆空的项无法展示，丢弃。
      *
+     * 单项且该项标了 `bubble: false` 时返回 null：不弹气泡，长按直接执行该项动作；
+     * 多项时不支持 `bubble: false`（会让该项无法选中），一律按气泡展示。
+     *
      * 26 键字母区（标准/横屏紧凑）、逗号键、中英键、九键共用，保证各处 label 处理一致。
      */
-    fun longPressDisplayItems(config: LongPressAction?): List<String>? =
-        config?.values
-            ?.map { longPressItemKey(it) }
-            ?.filter { it.isNotEmpty() }
-            ?.takeIf { it.isNotEmpty() }
+    fun longPressDisplayItems(config: LongPressAction?): List<String>? {
+        val values = config?.values ?: return null
+        if (isBubbleOffSingleValue(values)) return null
+        return values.map { longPressItemKey(it) }.filter { it.isNotEmpty() }.takeIf { it.isNotEmpty() }
+    }
 
     /** 长按气泡的「显示项文本 → 动作」映射；键与 [longPressDisplayItems] 完全一致（不可展示的项不进入映射）。 */
-    fun longPressActionMap(config: LongPressAction?): Map<String, KeyAction>? =
-        config?.values
-            ?.filter { longPressItemKey(it).isNotEmpty() }
-            ?.associateBy { longPressItemKey(it) }
+    fun longPressActionMap(config: LongPressAction?): Map<String, KeyAction>? {
+        val values = config?.values ?: return null
+        if (isBubbleOffSingleValue(values)) return emptyMap()
+        return values.filter { longPressItemKey(it).isNotEmpty() }.associateBy { longPressItemKey(it) }
+    }
+
+    /** 单项 long_press 标了 `bubble: false`：不弹气泡，该项作为直接长按动作。 */
+    private fun isBubbleOffSingleValue(values: List<KeyAction>): Boolean =
+        values.size == 1 && !values.first().bubble
 
     /** 长按气泡条目的显示文本与查找键（label 优先，缺省 value）。 */
     private fun longPressItemKey(action: KeyAction): String = action.label.ifEmpty { action.value }

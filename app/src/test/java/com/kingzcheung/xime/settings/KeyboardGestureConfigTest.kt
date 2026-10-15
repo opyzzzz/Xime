@@ -44,6 +44,18 @@ class KeyboardGestureConfigTest {
     }
 
     @Test
+    fun `逗号上滑 command symbol 解析为打开符号面板命令`() {
+        val kc = parse(
+            """comma: { width: 0.8, tap: { label: "，", value: "," }, swipe_up: { label: "符号", action: "command", value: "symbol" } }"""
+        )["comma"]!!
+        assertEquals("，", kc.tap!!.label)
+        assertEquals(",", kc.tap!!.value)
+        assertEquals("符号", kc.swipeUp!!.label)
+        assertEquals(GestureAction.COMMAND, kc.swipeUp!!.action)
+        assertEquals("symbol", kc.swipeUp!!.value)
+    }
+
+    @Test
     fun `double_tap 字符串简写默认为 commit`() {
         val kc = parse("a: { tap: \"a\", double_tap: \"A\" }")["a"]!!
         assertEquals(GestureAction.COMMIT, kc.doubleTap!!.action)
@@ -231,6 +243,43 @@ class KeyboardGestureConfigTest {
             listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "10"),
             KeysConfigHelper.longPressDisplayItems(lp),
         )
+    }
+
+    @Test
+    fun `long_press 单项 bubble false 时不弹气泡`() {
+        val lp = parse("""a: { long_press: { values: [{ label: "语音", action: "voice", bubble: false }] } }""")["a"]!!.longPress!!
+        assertEquals(1, lp.values.size)
+        assertFalse(lp.values[0].bubble)
+        assertNull(KeysConfigHelper.longPressDisplayItems(lp))
+        assertTrue(KeysConfigHelper.longPressActionMap(lp)!!.isEmpty())
+    }
+
+    @Test
+    fun `long_press 多项时 bubble false 被忽略`() {
+        val lp = parse("""a: { long_press: { values: [{ value: "，", bubble: false }, { value: "。" }] } }""")["a"]!!.longPress!!
+        assertEquals(listOf("，", "。"), KeysConfigHelper.longPressDisplayItems(lp))
+        assertEquals(setOf("，", "。"), KeysConfigHelper.longPressActionMap(lp)!!.keys)
+    }
+
+    @Test
+    fun `long_press 可直写单个 action 与 value`() {
+        val lp = parse("""a: { long_press: { action: "commit", value: "A" } }""")["a"]!!.longPress!!
+        assertEquals(1, lp.values.size)
+        assertEquals(GestureAction.COMMIT, lp.values[0].action)
+        assertEquals("A", lp.values[0].value)
+        assertEquals(listOf("A"), KeysConfigHelper.longPressDisplayItems(lp))
+    }
+
+    @Test
+    fun `long_press 直写且 bubble false 时不弹气泡`() {
+        val lp = parse("""a: { long_press: { action: "voice", bubble: false } }""")["a"]!!.longPress!!
+        assertEquals(GestureAction.VOICE, lp.values[0].action)
+        assertNull(KeysConfigHelper.longPressDisplayItems(lp))
+    }
+
+    @Test
+    fun `long_press 空对象不生效`() {
+        assertNull(parse("""a: { long_press: {} }""")["a"]!!.longPress)
     }
 
     @Test

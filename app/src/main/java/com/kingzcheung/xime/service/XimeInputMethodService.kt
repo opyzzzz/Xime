@@ -96,8 +96,10 @@ import com.kingzcheung.xime.rime.RimeConfigHelper
 import com.kingzcheung.xime.rime.RimeEngine
 import com.kingzcheung.xime.rime.T9InputController
 import com.kingzcheung.xime.rime.buildT9DisplayState
+import com.kingzcheung.xime.rime.RimeCandidate
 import com.kingzcheung.xime.rime.resolveRimeCandidateIndex
 
+import com.kingzcheung.xime.correction.KeyTapLogger
 import com.kingzcheung.xime.settings.SchemaConfigHelper
 import com.kingzcheung.xime.settings.SchemaManager
 import com.kingzcheung.xime.settings.SettingsPreferences
@@ -369,13 +371,21 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     internal fun refreshExpandedCandidates() {
         if (!keyboardViewModel.candidatePageExpanded.value) {
             if (candidateState.value.expandedCandidates.isNotEmpty()) {
-                candidateState.value = candidateState.value.copy(expandedCandidates = emptyList())
+                candidateState.value = candidateState.value.copy(
+                    expandedCandidates = emptyList(),
+                    expandedActions = emptyList()
+                )
             }
             return
         }
         val perfT0 = android.os.SystemClock.elapsedRealtime()
+        // 纠错候选由 librime 插件（correction_translator）直接产出并参与引擎排序，
+        // 展开页只需拉取引擎的跨页全量候选，不再在 Kotlin 侧合成候选。
         val all = rimeEngine.getAllCandidates().toList()
-        candidateState.value = candidateState.value.copy(expandedCandidates = all)
+        candidateState.value = candidateState.value.copy(
+            expandedCandidates = all,
+            expandedActions = emptyList()
+        )
         android.util.Log.d(
             "CandidatePerf",
             "refreshExpandedCandidates: count=${all.size} cost=${android.os.SystemClock.elapsedRealtime() - perfT0}ms"
@@ -624,6 +634,9 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         
         
         FileLogger.init(this)
+        KeyTapLogger.init(this)
+        KeyTapLogger.enabled = SettingsPreferences.isKeyTapLogEnabled(this)
+        KeyTapLogger.schemaProvider = { uiState.value.currentSchemaId }
         FileLogger.i(TAG, "XimeInputMethodService created")
         FileLogger.i(
             TAG,
@@ -2303,6 +2316,9 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         }
     }
 
+    /** onUpdateSelection 重入闸门（见 SelectionUpdateGate）。 */
+    private val selectionUpdateGate = SelectionUpdateGate()
+
     override fun onUpdateSelection(
         oldSelStart: Int,
         oldSelEnd: Int,
@@ -2312,18 +2328,24 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         candidatesEnd: Int,
     ) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
-        if (!shouldBreakCompositionOnSelectionChange(
-                oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd
+        // 自身写入 InputConnection 会同步触发本回调，处理中直接忽略，避免递归
+        if (!selectionUpdateGate.tryEnter()) return
+        try {
+            if (!shouldBreakCompositionOnSelectionChange(
+                    oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd
+                )
+            ) {
+                return
+            }
+            if (!hasPendingComposition()) return
+            FileLogger.i(
+                TAG,
+                "onUpdateSelection: 丢弃待上屏组合态 ($oldSelStart,$oldSelEnd)->($newSelStart,$newSelEnd)"
             )
-        ) {
-            return
+            breakPendingCompositionForCaretMove(newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+        } finally {
+            selectionUpdateGate.exit()
         }
-        if (!hasPendingComposition()) return
-        FileLogger.i(
-            TAG,
-            "onUpdateSelection: 丢弃待上屏组合态 ($oldSelStart,$oldSelEnd)->($newSelStart,$newSelEnd)"
-        )
-        breakPendingCompositionForCaretMove(newSelStart, newSelEnd, candidatesStart, candidatesEnd)
     }
 
     /** 是否存在未上屏的组合态（输入框 composing / t9 半提交 / 引擎输入）。 */
@@ -2909,6 +2931,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
      * 需在主线程调用。
      */
     internal fun commitTextSilently(text: String, isPaste: Boolean = false) {
+        // 会话日志：上屏文本（用于把按键序列与其最终结果对齐）
+        KeyTapLogger.recordCommit(text, isPaste)
         if (uiState.value.quickSendFormFocused) {
             // 焦点在触发编码输入框时路由到编码框，否则路由到快捷发送文本框
             val codeFocused = uiState.value.quickSendCodeFocused

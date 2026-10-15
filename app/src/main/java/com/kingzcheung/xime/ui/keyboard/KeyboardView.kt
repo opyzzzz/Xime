@@ -909,6 +909,8 @@ fun KeyboardView(
                                     ))
                                 }
                                 "emoji" -> viewModel.showOverlay(OverlayRoute.Emoji)
+                                // 与 emoji 同档：command: symbol / 自定义键发 "symbol" 时打开符号面板
+                                "symbol" -> viewModel.showOverlay(OverlayRoute.Symbol)
                                 else -> {
                                     callbacks.onKeyPress(key, isShifted)
                                     viewModel.onCharacterTyped()
@@ -1314,7 +1316,7 @@ fun KeyboardView(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = state.deploymentMessage.ifEmpty { "正在初始�?.." },
+                        text = state.deploymentMessage.ifEmpty { "正在初始化..." },
                         color = keyTextColor,
                         style = androidx.compose.material3.MaterialTheme.typography.bodyLarge
                     )
@@ -1328,7 +1330,7 @@ fun KeyboardView(
                         )
                     } else {
                         Text(
-                            text = "???",
+                            text = "请稍候",
                             color = keyTextColor.copy(alpha = 0.7f),
                             style = androidx.compose.material3.MaterialTheme.typography.bodyMedium
                         )
