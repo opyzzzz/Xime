@@ -1,0 +1,167 @@
+name: Sync upstream main and patched tags
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: upstream-main-and-tag-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate sync token
+        shell: bash
+        env:
+          SYNC_TOKEN: ${{ secrets.SYNC_PAT }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$SYNC_TOKEN" ]]; then
+            echo "::error::Repository secret SYNC_PAT is required."
+            exit 1
+          fi
+
+      - name: Checkout fork main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_PAT }}
+
+      - name: Configure git and fetch upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/ximeiorg/Xime.git
+          git fetch origin +refs/heads/main:refs/remotes/origin/main
+          git fetch upstream +refs/heads/main:refs/remotes/upstream/main
+          git switch -C main refs/remotes/origin/main
+
+      - name: Sync upstream main
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git merge-base --is-ancestor refs/remotes/upstream/main HEAD; then
+            echo "Fork main already contains upstream main."
+          else
+            git merge --no-edit --no-ff refs/remotes/upstream/main
+          fi
+          git push origin HEAD:refs/heads/main
+
+      - name: Select upstream tags from v3.5.0 onward
+        id: select
+        shell: bash
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import re
+          import subprocess
+
+          baseline = (3, 5, 0, 1)  # include stable v3.5.0; exclude its prereleases
+          rows = subprocess.check_output(
+              ["git", "ls-remote", "--refs", "--tags", "upstream"], text=True
+          ).splitlines()
+
+          def version_key(tag):
+              match = re.fullmatch(
+                  r"v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?",
+                  tag,
+              )
+              if not match:
+                  return None
+              major, minor, patch = map(int, match.groups()[:3])
+              return (major, minor, patch, 0 if match.group(4) else 1)
+
+          tags = []
+          for row in rows:
+              _, ref = row.split("\t", 1)
+              tag = ref.removeprefix("refs/tags/")
+              key = version_key(tag)
+              if key is not None and key >= baseline:
+                  tags.append((key, tag))
+
+          tags.sort(key=lambda item: (item[0], item[1]))
+          print("tags<<EOF")
+          print("\n".join(tag for _, tag in tags))
+          print("EOF")
+          PY
+
+      - name: Apply inline autofill patch and publish same-name tags
+        if: steps.select.outputs.tags != ''
+        env:
+          ELIGIBLE_TAGS: ${{ steps.select.outputs.tags }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Keep the patch tool from the synchronized fork main while checking out upstream tags.
+          git show main:patches/inline-autofill-toggle/apply.sh > /tmp/apply-inline-autofill-toggle.sh
+          chmod +x /tmp/apply-inline-autofill-toggle.sh
+
+          while IFS= read -r tag; do
+            [[ -n "$tag" ]] || continue
+
+            upstream_ref="refs/upstream/tags/$tag"
+            git fetch upstream "+refs/tags/$tag:$upstream_ref"
+            upstream_commit="$(git rev-parse "$upstream_ref^{commit}")"
+
+            echo "::group::Patch $tag"
+            git checkout --detach "$upstream_ref"
+
+            # Only add the inline autofill preference, UI toggle, and service gate.
+            ALLOW_NON_MAIN=1 bash /tmp/apply-inline-autofill-toggle.sh
+            git diff --check
+            git add \
+              app/src/main/java/com/kingzcheung/xime/settings/SettingsPreferences.kt \
+              app/src/main/java/com/kingzcheung/xime/ui/settings/LayoutDisplaySettingsScreen.kt \
+              app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
+
+            if ! git diff --cached --quiet; then
+              git commit -m "feat: apply inline autofill toggle to $tag"
+            else
+              echo "Inline autofill patch already exists in $tag."
+            fi
+
+            patched_commit="$(git rev-parse HEAD)"
+            remote_tag="$(git ls-remote --tags origin "refs/tags/$tag" | awk 'NR==1 {print $1}')"
+            remote_peeled="$(git ls-remote --tags origin "refs/tags/$tag^{}" | awk 'NR==1 {print $1}')"
+            remote_target="$remote_peeled"
+            if [[ -z "$remote_target" ]]; then
+              remote_target="$remote_tag"
+            fi
+
+            if [[ -n "$remote_target" ]]; then
+              origin_ref="refs/origin/tags/$tag"
+              git fetch origin "+refs/tags/$tag:$origin_ref"
+              origin_commit="$(git rev-parse "$origin_ref^{commit}")"
+              origin_parent="$(git rev-parse "$origin_commit^" 2>/dev/null || true)"
+              if [[ "$origin_parent" == "$upstream_commit" ]] && git diff --quiet "$origin_commit" "$patched_commit"; then
+                echo "Fork tag $tag already has the current inline autofill patch; skipping."
+                echo "::endgroup::"
+                continue
+              fi
+            fi
+
+            # No tag is pushed before this point: the upstream tag was fetched locally,
+            # the inline autofill patch was applied, and the resulting commit was checked.
+            if [[ "$patched_commit" == "$upstream_commit" ]]; then
+              echo "::error::Patch produced no commit for $tag; refusing to publish an unpatched tag."
+              exit 1
+            fi
+
+            # Same tag name, patched commit. Upstream tags are never changed.
+            git tag -f -a "$tag" "$patched_commit" -m "Xime $tag with inline autofill suggestions toggle"
+            git push --force origin "refs/tags/$tag:refs/tags/$tag"
+            echo "Published patched tag $tag -> $patched_commit"
+            echo "::endgroup::"
+          done <<< "$ELIGIBLE_TAGS"
+
+          git switch main
+          git status --short
