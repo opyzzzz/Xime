@@ -133,7 +133,11 @@ jobs:
             ALLOW_NON_MAIN=1 bash /tmp/apply-inline-autofill-toggle.sh
             git diff --check
 
-            git add               app/build-logic/tasks-native.gradle.kts               app/src/main/java/com/kingzcheung/xime/settings/SettingsPreferences.kt               app/src/main/java/com/kingzcheung/xime/ui/settings/LayoutDisplaySettingsScreen.kt               app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
+            git add \
+              app/build-logic/tasks-native.gradle.kts \
+              app/src/main/java/com/kingzcheung/xime/settings/SettingsPreferences.kt \
+              app/src/main/java/com/kingzcheung/xime/ui/settings/LayoutDisplaySettingsScreen.kt \
+              app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
 
             if ! git diff --cached --quiet; then
               git commit -m "build: apply optional ONNX and inline autofill patches to $tag"
