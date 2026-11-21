@@ -29,7 +29,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/ximeiorg/Xime.git
-          git fetch origin patch/inline-autofill-toggle
+          git fetch origin refs/heads/patch/inline-autofill-toggle:refs/remotes/origin/patch/inline-autofill-toggle
           git fetch upstream
 
       - name: Select upstream tags from v3.5.0 onward
