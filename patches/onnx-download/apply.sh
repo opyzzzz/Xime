@@ -25,7 +25,7 @@ if not path.is_file():
     raise SystemExit(f"ONNX build file not found: {path}")
 text = path.read_text(encoding="utf-8")
 
-begin = "// BEGIN ONNX_DOWNLOAD_PATCH:ARCHIVE_HEADERS"
+begin = "// BEGIN ONNX_DOWNLOAD_PATCH:RAW_HEADERS"
 end = "// END ONNX_DOWNLOAD_PATCH:ARCHIVE_HEADERS"
 if begin in text and end in text:
     print("ONNX download patch is already applied.")
@@ -38,7 +38,7 @@ if text.count(old_base) != 1:
     raise SystemExit("ONNX header URL anchor changed; patch not applied.")
 text = text.replace(
     old_base,
-    'val onnxHeadersArchiveUrl = "https://github.com/microsoft/onnxruntime/archive/refs/heads/rel-${onnxVersion}.zip"',
+    'val onnxHeadersBase = "https://raw.githubusercontent.com/microsoft/onnxruntime/rel-${onnxVersion}/include/onnxruntime"',
     1,
 )
 
@@ -62,66 +62,21 @@ old_loop = '''        for (rel in headersToFetch) {
             }
         }
 '''
-new_loop = '''        // BEGIN ONNX_DOWNLOAD_PATCH:ARCHIVE_HEADERS
-        // Fetch the complete, version-matched source archive instead of individual raw URLs.
-        val headersZip = File(buildDir, "onnxruntime-${onnxVersion}-headers.zip")
-        fun isValidZip(file: File): Boolean {
-            return try {
-                val bytes = file.inputStream().use { input -> ByteArray(4).also { input.read(it) } }
-                bytes.size == 4 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4b.toByte() &&
-                    bytes[2] == 0x03.toByte() && bytes[3] == 0x04.toByte()
-            } catch (_: Exception) {
-                false
-            }
-        }
-        val archiveUrls = listOf(
-            onnxHeadersArchiveUrl,
-            "https://codeload.github.com/microsoft/onnxruntime/legacy.zip/refs/heads/rel-${onnxVersion}"
-        )
-        var archiveDownloaded = false
-        for (url in archiveUrls) {
-            headersZip.delete()
-            if (downloadWithMirrors(listOf(url), headersZip, buildDir, "ONNX Runtime v${onnxVersion} source archive") &&
-                isValidZip(headersZip)) {
-                archiveDownloaded = true
-                break
-            }
-            headersZip.delete()
-        }
-        if (!archiveDownloaded) {
-            throw GradleException("Failed to download a valid ONNX Runtime v${onnxVersion} source archive")
-        }
-
-        val archiveDir = File(buildDir, "onnxruntime-${onnxVersion}-headers")
-        archiveDir.deleteRecursively()
-        try {
-            copy {
-                from(zipTree(headersZip))
-                into(archiveDir)
-            }
-        } catch (e: Exception) {
-            throw GradleException("Failed to extract ONNX Runtime source archive: ${e.message}")
-        }
-        val sourceInclude = archiveDir.walkTopDown().firstOrNull {
-            it.isDirectory && it.name == "onnxruntime" &&
-                File(it, "core/session/onnxruntime_c_api.h").isFile
-        } ?: throw GradleException("ONNX Runtime archive does not contain include/onnxruntime headers")
-
+new_loop = '''        // BEGIN ONNX_DOWNLOAD_PATCH:RAW_HEADERS
+        // Fetch exact versioned headers from the ONNX Runtime release branch.
         for (rel in headersToFetch) {
-            val source = File(sourceInclude, rel)
-            if (!source.isFile) {
-                throw GradleException("ONNX Runtime v${onnxVersion} archive is missing required header: $rel")
-            }
             val target = File(dstHeaders, rel.substringAfterLast("/"))
-            source.copyTo(target, overwrite = true)
-            println("Header ok: ${target.name}")
+            val url = "$onnxHeadersBase/$rel"
+            target.delete()
+            if (!downloadWithMirrors(githubUrls(url), target, buildDir, "onnxruntime header $rel")) {
+                throw GradleException("Failed to download required ONNX Runtime v\${onnxVersion} header: $rel")
+            }
+            if (!target.isFile || target.length() == 0L) {
+                throw GradleException("Downloaded ONNX Runtime header is empty or missing: $rel")
+            }
+            println("Header ok: \${target.name} (\${target.length()} bytes)")
         }
-        val requiredHeaders = listOf("onnxruntime_c_api.h", "onnxruntime_ep_c_api.h", "onnxruntime_error_code.h")
-        val missingHeaders = requiredHeaders.filterNot { File(dstHeaders, it).isFile }
-        if (missingHeaders.isNotEmpty()) {
-            throw GradleException("Required ONNX Runtime headers missing after extraction: ${missingHeaders.joinToString()}")
-        }
-        // END ONNX_DOWNLOAD_PATCH:ARCHIVE_HEADERS
+        // END ONNX_DOWNLOAD_PATCH:RAW_HEADERS
 '''
 if text.count(old_loop) != 1:
     raise SystemExit("ONNX header download loop changed; patch not applied.")
@@ -129,5 +84,5 @@ text = text.replace(old_loop, new_loop, 1)
 
 # Write only after all compatibility checks and transformations succeeded.
 path.write_text(text, encoding="utf-8")
-print("ONNX patch applied: version-matched GitHub source archive, ZIP validation, and fail-fast header verification.")
+print("ONNX patch applied: version-matched release-branch raw headers with fail-fast verification.")
 PY
