@@ -121,6 +121,12 @@ jobs:
               echo "::warning::ONNX download patch could not be applied to $tag; continuing with upstream ONNX build logic."
               git reset --hard "$upstream_commit"
               git clean -fd
+            else
+              # The inline patch script requires a clean tree; commit ONNX locally, never push it separately.
+              git add app/build-logic/tasks-native.gradle.kts
+              if ! git diff --cached --quiet; then
+                git commit -m "build: apply optional ONNX download patch to $tag"
+              fi
             fi
 
             # Inline toggle is required. Any failure stops this job before publishing this tag.
