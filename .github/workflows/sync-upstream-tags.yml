@@ -1,0 +1,115 @@
+name: Sync upstream tags and apply local patch
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: upstream-tag-sync
+  cancel-in-progress: false
+
+jobs:
+  sync-tags-and-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/ximeiorg/Xime.git
+          git fetch upstream --tags
+
+      - name: Select upstream tags from v3.5.0 onward
+        id: select
+        shell: bash
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import re
+          import subprocess
+
+          baseline = (3, 5, 0, 1)  # stable v3.5.0; prereleases of v3.5.0 are older
+          tags = subprocess.check_output(
+              ["git", "tag", "--list"], text=True
+          ).splitlines()
+
+          def version_key(tag):
+              match = re.fullmatch(r"v(\\d+)\\.(\\d+)\\.(\\d+)(?:[-+].*)?", tag)
+              if not match:
+                  return None
+              major, minor, patch = map(int, match.groups())
+              stable = 0 if re.search(r"[-+]", tag) else 1
+              return (major, minor, patch, stable)
+
+          selected = [
+              tag for tag in tags
+              if (key := version_key(tag)) is not None and key >= baseline
+          ]
+          selected.sort(key=lambda tag: (version_key(tag), tag))
+          print("tags<<EOF")
+          print("\\n".join(selected))
+          print("EOF")
+          PY
+
+      - name: Publish eligible tags and create patched branches
+        if: steps.select.outputs.tags != ''
+        env:
+          ELIGIBLE_TAGS: ${{ steps.select.outputs.tags }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Keep the patch script from the workflow branch; upstream tags do not contain it.
+          git show "${GITHUB_SHA}:patches/inline-autofill-toggle/apply.sh" > /tmp/apply-inline-autofill-toggle.sh
+
+          while IFS= read -r tag; do
+            [[ -n "$tag" ]] || continue
+            tag_sha="$(git rev-parse "refs/tags/$tag^{commit}")"
+
+            remote_tag_sha="$(git ls-remote --tags origin "refs/tags/$tag" | awk '{print $1}')"
+            if [[ -z "$remote_tag_sha" ]]; then
+              echo "Publishing upstream tag $tag ($tag_sha)"
+              git push origin "refs/tags/$tag:refs/tags/$tag"
+            elif [[ "$remote_tag_sha" != "$tag_sha" ]]; then
+              echo "::error::Tag $tag already exists on origin but points to a different commit; refusing to overwrite it."
+              exit 1
+            else
+              echo "Tag $tag already synchronized."
+            fi
+
+            patched_branch="upstream-patched/$tag"
+            remote_branch_sha="$(git ls-remote --heads origin "refs/heads/$patched_branch" | awk '{print $1}')"
+            if [[ -n "$remote_branch_sha" ]]; then
+              echo "Patched branch $patched_branch already exists; skipping."
+              continue
+            fi
+
+            echo "Applying local patch to $tag"
+            git checkout --detach "$tag"
+            ALLOW_NON_MAIN=1 bash /tmp/apply-inline-autofill-toggle.sh
+
+            git switch -c "$patched_branch"
+            git diff --check
+            git add \
+              app/src/main/java/com/kingzcheung/xime/settings/SettingsPreferences.kt \
+              app/src/main/java/com/kingzcheung/xime/ui/settings/LayoutDisplaySettingsScreen.kt \
+              app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
+            if git diff --cached --quiet; then
+              echo "No patch delta for $tag; creating no patched branch."
+              git switch --detach "$tag"
+              continue
+            fi
+            git commit -m "feat: apply inline autofill toggle patch on $tag"
+            git push origin "HEAD:refs/heads/$patched_branch"
+            git switch --detach "$tag"
+          done <<< "$ELIGIBLE_TAGS"
