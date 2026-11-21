@@ -30,7 +30,7 @@ files = [
 pattern = re.compile(
     r"^[ \t]*// BEGIN (INLINE_AUTOFILL_TOGGLE:[A-Z_]+)\r?\n"
     r".*?"
-    r"^[ \t]*// END \\1\r?\n?",
+    r"^[ \t]*// END \x5c1\r?\n?",
     re.MULTILINE | re.DOTALL,
 )
 updated = []
