@@ -56,13 +56,37 @@ jobs:
           fi
           git push origin HEAD:refs/heads/main
 
-      - name: Select upstream tags from v3.5.0 onward
+      - name: Select new or changed upstream tags
         id: select
+        env:
+          STATE_VERSION: "1"
         shell: bash
         run: |
-          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          PATCH_FINGERPRINT="$( { printf 'sync-state-v%s\\n' "$STATE_VERSION"; sha256sum patches/onnx-download/apply.sh patches/inline-autofill-toggle/apply.sh; } | sha256sum | awk '{print $1}')"
+          echo "patch_fingerprint=$PATCH_FINGERPRINT" >> "$GITHUB_OUTPUT"
+
+          python3 - "$PATCH_FINGERPRINT" "$STATE_VERSION" <<'PY' >> "$GITHUB_OUTPUT"
+          import json
           import re
           import subprocess
+          import sys
+          from pathlib import Path
+
+          fingerprint, state_version = sys.argv[1], int(sys.argv[2])
+          state_path = Path(".github/upstream-tag-sync-state.json")
+          try:
+              state = json.loads(state_path.read_text(encoding="utf-8"))
+          except FileNotFoundError:
+              state = {}
+          except (json.JSONDecodeError, OSError) as exc:
+              raise SystemExit(f"Cannot read tag sync state safely: {exc}")
+
+          state_valid = (
+              state.get("state_version") == state_version
+              and state.get("patch_fingerprint") == fingerprint
+              and isinstance(state.get("tags"), dict)
+          )
 
           baseline = (3, 5, 0, 1)  # include stable v3.5.0; exclude its prereleases
           rows = subprocess.check_output(
@@ -71,7 +95,7 @@ jobs:
 
           def version_key(tag):
               match = re.fullmatch(
-                  r"v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?",
+                  r"v(\\d+)\\.(\\d+)\\.(\\d+)(?:-([0-9A-Za-z.-]+))?(?:\\+[0-9A-Za-z.-]+)?",
                   tag,
               )
               if not match:
@@ -79,27 +103,60 @@ jobs:
               major, minor, patch = map(int, match.groups()[:3])
               return (major, minor, patch, 0 if match.group(4) else 1)
 
-          tags = []
+          candidates = []
+          total = 0
           for row in rows:
-              _, ref = row.split("\t", 1)
+              ref_sha, ref = row.split("\\t", 1)
               tag = ref.removeprefix("refs/tags/")
               key = version_key(tag)
-              if key is not None and key >= baseline:
-                  tags.append((key, tag))
+              if key is None or key < baseline:
+                  continue
+              total += 1
+              previous = state.get("tags", {}).get(tag, {})
+              if not state_valid or previous.get("upstream_ref_sha") != ref_sha:
+                  candidates.append((key, tag, ref_sha))
 
-          tags.sort(key=lambda item: (item[0], item[1]))
+          candidates.sort(key=lambda item: (item[0], item[1]))
+          print(f"tag_count={total}")
+          print(f"candidate_count={len(candidates)}")
           print("tags<<EOF")
-          print("\n".join(tag for _, tag in tags))
+          print("\\n".join(tag for _, tag, _ in candidates))
           print("EOF")
+          print(f"state_valid={'true' if state_valid else 'false'}")
           PY
 
-      - name: Apply optional ONNX patch, required inline patch, and publish tags
+      - name: Apply patches only to changed tags and publish
         if: steps.select.outputs.tags != ''
         env:
           ELIGIBLE_TAGS: ${{ steps.select.outputs.tags }}
+          PATCH_FINGERPRINT: ${{ steps.select.outputs.patch_fingerprint }}
+          STATE_VERSION: "1"
         shell: bash
         run: |
           set -euo pipefail
+
+          state_file=".github/upstream-tag-sync-state.json"
+          state_tmp="/tmp/upstream-tag-sync-state.json"
+          python3 - "$state_file" "$state_tmp" "$PATCH_FINGERPRINT" "$STATE_VERSION" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          source, target, fingerprint, version = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+          try:
+              state = json.loads(Path(source).read_text(encoding="utf-8"))
+          except FileNotFoundError:
+              state = {}
+          except (json.JSONDecodeError, OSError) as exc:
+              raise SystemExit(f"Cannot read tag sync state safely: {exc}")
+
+          if state.get("state_version") != version or state.get("patch_fingerprint") != fingerprint:
+              state = {"state_version": version, "patch_fingerprint": fingerprint, "tags": {}}
+          state["state_version"] = version
+          state["patch_fingerprint"] = fingerprint
+          state.setdefault("tags", {})
+          Path(target).write_text(json.dumps(state, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
+          PY
 
           # Keep both patch tools from synchronized fork main while checking out upstream tags.
           git show main:patches/inline-autofill-toggle/apply.sh > /tmp/apply-inline-autofill-toggle.sh
@@ -111,13 +168,16 @@ jobs:
 
             upstream_ref="refs/upstream/tags/$tag"
             git fetch upstream "+refs/tags/$tag:$upstream_ref"
+            upstream_ref_sha="$(git rev-parse "$upstream_ref")"
             upstream_commit="$(git rev-parse "$upstream_ref^{commit}")"
 
             echo "::group::Patch $tag"
             git checkout --detach "$upstream_ref"
 
+            onnx_status="applied"
             # ONNX patch is best-effort: incompatibility must not block the inline patch or tag.
             if ! ALLOW_NON_MAIN=1 bash /tmp/apply-onnx-download.sh; then
+              onnx_status="warning"
               echo "::warning::ONNX download patch could not be applied to $tag; continuing with upstream ONNX build logic."
               git reset --hard "$upstream_commit"
               git clean -fd
@@ -159,23 +219,53 @@ jobs:
               origin_commit="$(git rev-parse "$origin_ref^{commit}")"
               if git merge-base --is-ancestor "$upstream_commit" "$origin_commit" &&
                 git diff --quiet "$origin_commit^{tree}" "$patched_commit^{tree}"; then
-                echo "Fork tag $tag already has the current patch result; skipping."
-                echo "::endgroup::"
-                continue
+                echo "Fork tag $tag already has the current patch result; skipping push."
+              else
+                if [[ "$patched_commit" == "$upstream_commit" ]]; then
+                  echo "::error::Inline patch produced no changes for $tag; refusing to publish an unpatched tag."
+                  exit 1
+                fi
+                git tag -f -a "$tag" "$patched_commit" -m "Xime $tag with optional ONNX and inline autofill patches"
+                git push --force origin "refs/tags/$tag:refs/tags/$tag"
+                echo "Updated patched tag $tag -> $patched_commit"
               fi
+            else
+              if [[ "$patched_commit" == "$upstream_commit" ]]; then
+                echo "::error::Inline patch produced no changes for $tag; refusing to publish an unpatched tag."
+                exit 1
+              fi
+              git tag -f -a "$tag" "$patched_commit" -m "Xime $tag with optional ONNX and inline autofill patches"
+              git push origin "refs/tags/$tag:refs/tags/$tag"
+              echo "Published patched tag $tag -> $patched_commit"
             fi
 
-            # Publish exactly once, only after both patch steps have completed.
-            if [[ "$patched_commit" == "$upstream_commit" ]]; then
-              echo "::error::Inline patch produced no changes for $tag; refusing to publish an unpatched tag."
-              exit 1
-            fi
+            # Persist per-tag progress in a temporary state file; commit it to main after all candidates pass.
+            python3 - "$state_tmp" "$tag" "$upstream_ref_sha" "$upstream_commit" "$patched_commit" "$onnx_status" "$PATCH_FINGERPRINT" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
 
-            git tag -f -a "$tag" "$patched_commit" -m "Xime $tag with optional ONNX and inline autofill patches"
-            git push --force origin "refs/tags/$tag:refs/tags/$tag"
-            echo "Published patched tag $tag -> $patched_commit"
+          path, tag, ref_sha, upstream_commit, result_commit, onnx_status, fingerprint = sys.argv[1:]
+          state = json.loads(Path(path).read_text(encoding="utf-8"))
+          state["tags"][tag] = {
+              "upstream_ref_sha": ref_sha,
+              "upstream_commit": upstream_commit,
+              "result_commit": result_commit,
+              "onnx_patch": onnx_status,
+              "patch_fingerprint": fingerprint,
+          }
+          Path(path).write_text(json.dumps(state, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
+          PY
             echo "::endgroup::"
           done <<< "$ELIGIBLE_TAGS"
 
           git switch main
+          cp "$state_tmp" "$state_file"
+          git add "$state_file"
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: record upstream tag sync state"
+            git push origin HEAD:refs/heads/main
+          else
+            echo "Tag sync state is unchanged."
+          fi
           git status --short
