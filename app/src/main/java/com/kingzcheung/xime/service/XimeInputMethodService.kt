@@ -3024,6 +3024,9 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     override fun onCreateInlineSuggestionsRequest(uiExtras: Bundle): InlineSuggestionsRequest? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
         if (inlineSuggestionManager == null) return null
+        // BEGIN INLINE_AUTOFILL_TOGGLE:SERVICE_GATE
+        if (!SettingsPreferences.isInlineAutofillSuggestionsEnabled(this)) return null
+        // END INLINE_AUTOFILL_TOGGLE:SERVICE_GATE
         updateInlineSuggestionTheme()
         val result = inlineSuggestionManager.onCreateInlineSuggestionsRequest(uiExtras)
         return result
