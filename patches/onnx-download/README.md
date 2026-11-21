@@ -2,7 +2,7 @@
 
 This optional patch hardens ONNX Runtime header acquisition in `app/build-logic/tasks-native.gradle.kts`.
 
-- Fetches the source archive matching the pinned ONNX Runtime version rather than relying on individual raw-file URLs.
+- Fetches the ONNX Runtime release-branch archive (`rel-<version>`) matching the pinned runtime version rather than relying on individual raw-file URLs. The Android AAR remains pinned to the numeric `onnxVersion`.
 - Validates that the response is a ZIP before extraction.
 - Verifies every required header exists and fails the Gradle dependency task early if the archive is incomplete.
 - Keeps the AAR version pinned to the same `onnxVersion` as the headers.
