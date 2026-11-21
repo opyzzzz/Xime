@@ -80,11 +80,9 @@ if text.count(old_base) != 1:
     raise SystemExit("ONNX header URL anchor changed; patch not applied.")
 text = text.replace(
     old_base,
-    'val onnxHeadersBase = "https://raw.githubusercontent.com/microsoft/onnxruntime/rel-${onnxVersion}/include/onnxruntime"',
+    'val onnxHeadersBase = "https://raw.githubusercontent.com/microsoft/onnxruntime/v${onnxVersion}/include/onnxruntime"',
     1,
 )
-
-text = restrict_headers(text)
 
 old_aar = 'if (!downloadWithMirrors(listOf(onnxAarUrl), aar, buildDir, "onnxruntime-android AAR")) {'
 new_aar = '''val aarUrls = listOf(
