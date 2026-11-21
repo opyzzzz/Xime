@@ -60,6 +60,10 @@ object SettingsPreferences {
     const val KEY_LANDSCAPE_SPLIT_KEYBOARD_ENABLED = "landscape_split_keyboard_enabled"
     const val KEY_HARDWARE_KEYBOARD_DETECTION_ENABLED = "hardware_keyboard_detection_enabled"
 
+    // BEGIN INLINE_AUTOFILL_TOGGLE:PREF_KEY
+    const val KEY_INLINE_AUTOFILL_SUGGESTIONS_ENABLED = "inline_autofill_suggestions_enabled"
+    // END INLINE_AUTOFILL_TOGGLE:PREF_KEY
+
     private const val KEY_RIME_INSTALLATION_ID = "rime_installation_id"
 
     private const val KEY_LAST_RIME_SYNC_AT = "last_rime_sync_at"
@@ -96,6 +100,17 @@ object SettingsPreferences {
     fun setHardwareKeyboardDetectionEnabled(context: Context, enabled: Boolean) {
         getPrefs(context).edit().putBoolean(KEY_HARDWARE_KEYBOARD_DETECTION_ENABLED, enabled).apply()
     }
+
+    // BEGIN INLINE_AUTOFILL_TOGGLE:PREF_ACCESSORS
+    fun isInlineAutofillSuggestionsEnabled(context: Context): Boolean =
+        getPrefs(context).getBoolean(KEY_INLINE_AUTOFILL_SUGGESTIONS_ENABLED, true)
+
+    fun setInlineAutofillSuggestionsEnabled(context: Context, enabled: Boolean) {
+        getPrefs(context).edit()
+            .putBoolean(KEY_INLINE_AUTOFILL_SUGGESTIONS_ENABLED, enabled)
+            .apply()
+    }
+    // END INLINE_AUTOFILL_TOGGLE:PREF_ACCESSORS
     
     private const val KEY_LAYOUT_PREFIX = "layout_pref_"
     

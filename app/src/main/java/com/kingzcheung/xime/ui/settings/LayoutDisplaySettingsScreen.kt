@@ -87,6 +87,12 @@ fun LayoutDisplaySettingsContent(
     var showComments by remember {
         mutableStateOf(SettingsPreferences.showCandidateComments(context))
     }
+
+    // BEGIN INLINE_AUTOFILL_TOGGLE:UI_STATE
+    var inlineAutofillSuggestionsEnabled by remember {
+        mutableStateOf(SettingsPreferences.isInlineAutofillSuggestionsEnabled(context))
+    }
+    // END INLINE_AUTOFILL_TOGGLE:UI_STATE
     var inputTextLocation by remember {
         mutableStateOf(SettingsPreferences.getInputTextLocation(context))
     }
@@ -240,6 +246,20 @@ fun LayoutDisplaySettingsContent(
                             .fillMaxWidth()
                             .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp)
                     ) {
+
+                    // BEGIN INLINE_AUTOFILL_TOGGLE:UI_CONTROL
+                    SectionDivider()
+                    SettingsToggleItem(
+                        icon = Icons.AutoMirrored.TwoTone.Input,
+                        title = "内联自动填充建议",
+                        subtitle = "控制是否显示密码管理器提供的内联自动填充建议",
+                        checked = inlineAutofillSuggestionsEnabled,
+                        onCheckedChange = { enabled ->
+                            inlineAutofillSuggestionsEnabled = enabled
+                            SettingsPreferences.setInlineAutofillSuggestionsEnabled(context, enabled)
+                        }
+                    )
+                    // END INLINE_AUTOFILL_TOGGLE:UI_CONTROL
                         Text(
                             text = tr(R.string.s_bianmaxianshi),
                             style = MaterialTheme.typography.bodyLarge,
