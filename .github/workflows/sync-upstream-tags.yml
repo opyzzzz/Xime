@@ -95,7 +95,7 @@ jobs:
 
           def version_key(tag):
               match = re.fullmatch(
-                  r"v(\d+)\\.(\d+)\\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\\+[0-9A-Za-z.-]+)?",
+                  r"v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?",
                   tag,
               )
               if not match:
