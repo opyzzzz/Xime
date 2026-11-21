@@ -153,8 +153,8 @@ jobs:
               origin_ref="refs/origin/tags/$tag"
               git fetch origin "+refs/tags/$tag:$origin_ref"
               origin_commit="$(git rev-parse "$origin_ref^{commit}")"
-              origin_parent="$(git rev-parse "$origin_commit^" 2>/dev/null || true)"
-              if [[ "$origin_parent" == "$upstream_commit" ]] && git diff --quiet "$origin_commit" "$patched_commit"; then
+              if git merge-base --is-ancestor "$upstream_commit" "$origin_commit" &&
+                git diff --quiet "$origin_commit^{tree}" "$patched_commit^{tree}"; then
                 echo "Fork tag $tag already has the current patch result; skipping."
                 echo "::endgroup::"
                 continue
