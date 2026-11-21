@@ -121,7 +121,11 @@ val downloadOnnx by tasks.registering {
 
         // 1. 下载官方 AAR（含 4 ABI 的 libonnxruntime.so，内置 CPU + NNAPI EP）
         val aar = File(buildDir, "onnxruntime-android-${onnxVersion}.aar")
-        if (!downloadWithMirrors(listOf(onnxAarUrl), aar, buildDir, "onnxruntime-android AAR")) {
+        val aarUrls = listOf(
+            onnxAarUrl.replace("repo1.maven.org/maven2", "repo.maven.apache.org/maven2"),
+            onnxAarUrl
+        )
+        if (!downloadWithMirrors(aarUrls, aar, buildDir, "onnxruntime-android AAR")) {
             throw GradleException("Failed to download ONNX Runtime Android AAR: $onnxAarUrl")
         }
         println("AAR downloaded: ${aar.length()} bytes")
@@ -176,15 +180,21 @@ val downloadOnnx by tasks.registering {
         dstHeaders.listFiles()?.forEach { old ->
             if (old.isFile) old.delete()
         }
+        // BEGIN ONNX_DOWNLOAD_PATCH:RAW_HEADERS
+        // Fetch exact versioned headers from the ONNX Runtime release branch.
         for (rel in headersToFetch) {
-            val target = java.io.File(dstHeaders, rel.substringAfterLast("/"))
+            val target = File(dstHeaders, rel.substringAfterLast("/"))
             val url = "$onnxHeadersBase/$rel"
-            if (downloadWithMirrors(githubUrls(url), target, buildDir, "onnxruntime header $rel")) {
-                println("Header ok: ${target.name}")
-            } else {
-                System.err.println("WARNING: failed to fetch header $rel")
+            target.delete()
+            if (!downloadWithMirrors(githubUrls(url), target, buildDir, "onnxruntime header $rel")) {
+                throw GradleException("Failed to download required ONNX Runtime v${onnxVersion} header: $rel")
             }
+            if (!target.isFile || target.length() < 100L || target.readText().trimStart().startsWith("<")) {
+                throw GradleException("Downloaded ONNX Runtime header is empty or missing: $rel")
+            }
+            println("Header ok: ${target.name} (${target.length()} bytes)")
         }
+        // END ONNX_DOWNLOAD_PATCH:RAW_HEADERS
 
         // 4. Marker
         nnapiMarker.parentFile.mkdirs()
