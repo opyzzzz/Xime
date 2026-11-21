@@ -42,6 +42,16 @@ text = text.replace(
     1,
 )
 
+old_aar = 'if (!downloadWithMirrors(listOf(onnxAarUrl), aar, buildDir, "onnxruntime-android AAR")) {'
+new_aar = '''val aarUrls = listOf(
+            onnxAarUrl.replace("repo1.maven.org/maven2", "repo.maven.apache.org/maven2"),
+            onnxAarUrl
+        )
+        if (!downloadWithMirrors(aarUrls, aar, buildDir, "onnxruntime-android AAR")) {'''
+if text.count(old_aar) != 1:
+    raise SystemExit("ONNX AAR download anchor changed; patch not applied.")
+text = text.replace(old_aar, new_aar, 1)
+
 old_loop = '''        for (rel in headersToFetch) {
             val target = java.io.File(dstHeaders, rel.substringAfterLast("/"))
             val url = "$onnxHeadersBase/$rel"
