@@ -25,10 +25,33 @@ if not path.is_file():
     raise SystemExit(f"ONNX build file not found: {path}")
 text = path.read_text(encoding="utf-8")
 
+import re
+
 begin = "// BEGIN ONNX_DOWNLOAD_PATCH:RAW_HEADERS"
 end = "// END ONNX_DOWNLOAD_PATCH:RAW_HEADERS"
+
+def restrict_headers(source: str) -> str:
+    replacement = '''        val headersToFetch = listOf(
+            "core/session/onnxruntime_c_api.h",
+            "core/session/onnxruntime_error_code.h",
+        )'''
+    updated, count = re.subn(
+        r"        val headersToFetch = listOf\\([\\s\\S]*?\\n        \\)",
+        lambda _: replacement,
+        source,
+        count=1,
+    )
+    if count != 1:
+        raise SystemExit("ONNX headersToFetch list changed; refusing to guess required headers.")
+    return updated
+
 if begin in text and end in text:
-    print("ONNX download patch is already applied.")
+    updated = restrict_headers(text)
+    if updated != text:
+        path.write_text(updated, encoding="utf-8")
+        print("Updated existing ONNX patch to fetch only the C API headers used by Xime.")
+    else:
+        print("ONNX download patch is already applied with the minimal required header set.")
     raise SystemExit(0)
 if begin in text or end in text:
     raise SystemExit("Incomplete ONNX patch markers; refusing to modify the file.")
@@ -41,6 +64,8 @@ text = text.replace(
     'val onnxHeadersBase = "https://raw.githubusercontent.com/microsoft/onnxruntime/rel-${onnxVersion}/include/onnxruntime"',
     1,
 )
+
+text = restrict_headers(text)
 
 old_aar = 'if (!downloadWithMirrors(listOf(onnxAarUrl), aar, buildDir, "onnxruntime-android AAR")) {'
 new_aar = '''val aarUrls = listOf(
