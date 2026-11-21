@@ -16,19 +16,21 @@ jobs:
   sync-tags-and-patch:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout fork
+      - name: Checkout workflow branch
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          fetch-tags: true
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: \${{ secrets.GITHUB_TOKEN }}
 
-      - name: Configure git
+      - name: Configure git and fetch upstream tag list
+        shell: bash
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/ximeiorg/Xime.git
-          git fetch upstream --tags
+          git fetch origin patch/inline-autofill-toggle
+          git fetch upstream
 
       - name: Select upstream tags from v3.5.0 onward
         id: select
@@ -38,78 +40,90 @@ jobs:
           import re
           import subprocess
 
-          baseline = (3, 5, 0, 1)  # stable v3.5.0; prereleases of v3.5.0 are older
-          tags = subprocess.check_output(
-              ["git", "tag", "--list"], text=True
+          baseline = (3, 5, 0, 1)  # stable v3.5.0; prereleases of v3.5.0 are excluded
+          rows = subprocess.check_output(
+              ["git", "ls-remote", "--refs", "--tags", "upstream"], text=True
           ).splitlines()
 
           def version_key(tag):
-              match = re.fullmatch(r"v(\\d+)\\.(\\d+)\\.(\\d+)(?:[-+].*)?", tag)
+              match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?", tag)
               if not match:
                   return None
-              major, minor, patch = map(int, match.groups())
-              stable = 0 if re.search(r"[-+]", tag) else 1
+              major, minor, patch = map(int, match.groups()[:3])
+              prerelease = match.group(4)
+              stable = 0 if prerelease else 1
               return (major, minor, patch, stable)
 
-          selected = [
-              tag for tag in tags
-              if (key := version_key(tag)) is not None and key >= baseline
-          ]
-          selected.sort(key=lambda tag: (version_key(tag), tag))
+          tags = []
+          for row in rows:
+              _, ref = row.split("\t", 1)
+              tag = ref.removeprefix("refs/tags/")
+              key = version_key(tag)
+              if key is not None and key >= baseline:
+                  tags.append((key, tag))
+
+          tags.sort(key=lambda item: (item[0], item[1]))
           print("tags<<EOF")
-          print("\\n".join(selected))
+          print("\n".join(tag for _, tag in tags))
           print("EOF")
           PY
 
-      - name: Publish eligible tags and create patched branches
+      - name: Fetch eligible tags, publish missing tags, and apply patch
         if: steps.select.outputs.tags != ''
         env:
-          ELIGIBLE_TAGS: ${{ steps.select.outputs.tags }}
+          ELIGIBLE_TAGS: \${{ steps.select.outputs.tags }}
         shell: bash
         run: |
           set -euo pipefail
 
-          # Keep the patch script from the workflow branch; upstream tags do not contain it.
-          git show "${GITHUB_SHA}:patches/inline-autofill-toggle/apply.sh" > /tmp/apply-inline-autofill-toggle.sh
+          # The patch scripts live on this fork branch, not in upstream releases.
+          git show "origin/patch/inline-autofill-toggle:patches/inline-autofill-toggle/apply.sh" > /tmp/apply-inline-autofill-toggle.sh
 
           while IFS= read -r tag; do
             [[ -n "$tag" ]] || continue
-            tag_sha="$(git rev-parse "refs/tags/$tag^{commit}")"
 
-            remote_tag_sha="$(git ls-remote --tags origin "refs/tags/$tag" | awk '{print $1}')"
+            upstream_ref="refs/tags/upstream/$tag"
+            git fetch upstream "+refs/tags/$tag:$upstream_ref"
+            tag_sha="$(git rev-parse "$upstream_ref^{commit}")"
+
+            remote_tag_sha="$(git ls-remote --tags origin "refs/tags/$tag" | awk 'NR==1 {print $1}')"
             if [[ -z "$remote_tag_sha" ]]; then
               echo "Publishing upstream tag $tag ($tag_sha)"
-              git push origin "refs/tags/$tag:refs/tags/$tag"
-            elif [[ "$remote_tag_sha" != "$tag_sha" ]]; then
-              echo "::error::Tag $tag already exists on origin but points to a different commit; refusing to overwrite it."
-              exit 1
-            else
-              echo "Tag $tag already synchronized."
+              git push origin "$upstream_ref:refs/tags/$tag"
+            elif [[ "$remote_tag_sha" != "$(git rev-parse "$upstream_ref")" && "$remote_tag_sha" != "$tag_sha" ]]; then
+              # Annotated tags have a tag-object SHA; compare peeled commit too.
+              remote_peeled="$(git ls-remote --tags origin "refs/tags/$tag^{}" | awk 'NR==1 {print $1}')"
+              if [[ "$remote_peeled" != "$tag_sha" ]]; then
+                echo "::error::Tag $tag already exists on origin but points to a different commit; refusing to overwrite it."
+                exit 1
+              fi
             fi
 
             patched_branch="upstream-patched/$tag"
-            remote_branch_sha="$(git ls-remote --heads origin "refs/heads/$patched_branch" | awk '{print $1}')"
+            remote_branch_sha="$(git ls-remote --heads origin "refs/heads/$patched_branch" | awk 'NR==1 {print $1}')"
             if [[ -n "$remote_branch_sha" ]]; then
               echo "Patched branch $patched_branch already exists; skipping."
               continue
             fi
 
-            echo "Applying local patch to $tag"
-            git checkout --detach "$tag"
+            echo "Applying local patch to upstream tag $tag"
+            git checkout --detach "$upstream_ref"
             ALLOW_NON_MAIN=1 bash /tmp/apply-inline-autofill-toggle.sh
+            git diff --check
 
             git switch -c "$patched_branch"
-            git diff --check
             git add \
               app/src/main/java/com/kingzcheung/xime/settings/SettingsPreferences.kt \
               app/src/main/java/com/kingzcheung/xime/ui/settings/LayoutDisplaySettingsScreen.kt \
               app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
+
             if git diff --cached --quiet; then
-              echo "No patch delta for $tag; creating no patched branch."
-              git switch --detach "$tag"
+              echo "::warning::Patch produced no changes for $tag; no patched branch was pushed."
+              git switch --detach "$upstream_ref"
               continue
             fi
+
             git commit -m "feat: apply inline autofill toggle patch on $tag"
             git push origin "HEAD:refs/heads/$patched_branch"
-            git switch --detach "$tag"
+            git switch --detach "$upstream_ref"
           done <<< "$ELIGIBLE_TAGS"
