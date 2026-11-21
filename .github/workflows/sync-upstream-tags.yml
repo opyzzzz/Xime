@@ -93,7 +93,7 @@ jobs:
           print("EOF")
           PY
 
-      - name: Apply inline autofill patch and publish same-name tags
+      - name: Apply optional ONNX patch, required inline patch, and publish tags
         if: steps.select.outputs.tags != ''
         env:
           ELIGIBLE_TAGS: ${{ steps.select.outputs.tags }}
@@ -101,9 +101,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Keep the patch tool from the synchronized fork main while checking out upstream tags.
+          # Keep both patch tools from synchronized fork main while checking out upstream tags.
           git show main:patches/inline-autofill-toggle/apply.sh > /tmp/apply-inline-autofill-toggle.sh
-          chmod +x /tmp/apply-inline-autofill-toggle.sh
+          git show main:patches/onnx-download/apply.sh > /tmp/apply-onnx-download.sh
+          chmod +x /tmp/apply-inline-autofill-toggle.sh /tmp/apply-onnx-download.sh
 
           while IFS= read -r tag; do
             [[ -n "$tag" ]] || continue
@@ -115,18 +116,23 @@ jobs:
             echo "::group::Patch $tag"
             git checkout --detach "$upstream_ref"
 
-            # Only add the inline autofill preference, UI toggle, and service gate.
+            # ONNX patch is best-effort: incompatibility must not block the inline patch or tag.
+            if ! ALLOW_NON_MAIN=1 bash /tmp/apply-onnx-download.sh; then
+              echo "::warning::ONNX download patch could not be applied to $tag; continuing with upstream ONNX build logic."
+              git reset --hard "$upstream_commit"
+              git clean -fd
+            fi
+
+            # Inline toggle is required. Any failure stops this job before publishing this tag.
             ALLOW_NON_MAIN=1 bash /tmp/apply-inline-autofill-toggle.sh
             git diff --check
-            git add \
-              app/src/main/java/com/kingzcheung/xime/settings/SettingsPreferences.kt \
-              app/src/main/java/com/kingzcheung/xime/ui/settings/LayoutDisplaySettingsScreen.kt \
-              app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
+
+            git add               app/build-logic/tasks-native.gradle.kts               app/src/main/java/com/kingzcheung/xime/settings/SettingsPreferences.kt               app/src/main/java/com/kingzcheung/xime/ui/settings/LayoutDisplaySettingsScreen.kt               app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
 
             if ! git diff --cached --quiet; then
-              git commit -m "feat: apply inline autofill toggle to $tag"
+              git commit -m "build: apply optional ONNX and inline autofill patches to $tag"
             else
-              echo "Inline autofill patch already exists in $tag."
+              echo "Both patches already exist in $tag."
             fi
 
             patched_commit="$(git rev-parse HEAD)"
@@ -143,21 +149,19 @@ jobs:
               origin_commit="$(git rev-parse "$origin_ref^{commit}")"
               origin_parent="$(git rev-parse "$origin_commit^" 2>/dev/null || true)"
               if [[ "$origin_parent" == "$upstream_commit" ]] && git diff --quiet "$origin_commit" "$patched_commit"; then
-                echo "Fork tag $tag already has the current inline autofill patch; skipping."
+                echo "Fork tag $tag already has the current patch result; skipping."
                 echo "::endgroup::"
                 continue
               fi
             fi
 
-            # No tag is pushed before this point: the upstream tag was fetched locally,
-            # the inline autofill patch was applied, and the resulting commit was checked.
+            # Publish exactly once, only after both patch steps have completed.
             if [[ "$patched_commit" == "$upstream_commit" ]]; then
-              echo "::error::Patch produced no commit for $tag; refusing to publish an unpatched tag."
+              echo "::error::Inline patch produced no changes for $tag; refusing to publish an unpatched tag."
               exit 1
             fi
 
-            # Same tag name, patched commit. Upstream tags are never changed.
-            git tag -f -a "$tag" "$patched_commit" -m "Xime $tag with inline autofill suggestions toggle"
+            git tag -f -a "$tag" "$patched_commit" -m "Xime $tag with optional ONNX and inline autofill patches"
             git push --force origin "refs/tags/$tag:refs/tags/$tag"
             echo "Published patched tag $tag -> $patched_commit"
             echo "::endgroup::"
