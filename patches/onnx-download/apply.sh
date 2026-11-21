@@ -38,7 +38,7 @@ if text.count(old_base) != 1:
     raise SystemExit("ONNX header URL anchor changed; patch not applied.")
 text = text.replace(
     old_base,
-    'val onnxHeadersArchiveUrl = "https://github.com/microsoft/onnxruntime/archive/refs/tags/v${onnxVersion}.zip"',
+    'val onnxHeadersArchiveUrl = "https://github.com/microsoft/onnxruntime/archive/refs/heads/rel-${onnxVersion}.zip"',
     1,
 )
 
@@ -76,7 +76,7 @@ new_loop = '''        // BEGIN ONNX_DOWNLOAD_PATCH:ARCHIVE_HEADERS
         }
         val archiveUrls = listOf(
             onnxHeadersArchiveUrl,
-            "https://codeload.github.com/microsoft/onnxruntime/legacy.zip/refs/tags/v${onnxVersion}"
+            "https://codeload.github.com/microsoft/onnxruntime/legacy.zip/refs/heads/rel-${onnxVersion}"
         )
         var archiveDownloaded = false
         for (url in archiveUrls) {
