@@ -1,18 +1,18 @@
 {
-  "patch_fingerprint": "83ef88810f75d18ef063a5488975d72cd0477128e0ca515b23fd04b28fc8cfce",
+  "patch_fingerprint": "e21be367380c187980c6fd0cb175f6b1f09915748188db8210b2583ad08f8634",
   "state_version": 1,
   "tags": {
     "v3.5.0": {
-      "onnx_patch": "warning",
-      "patch_fingerprint": "83ef88810f75d18ef063a5488975d72cd0477128e0ca515b23fd04b28fc8cfce",
-      "result_commit": "cd1302d1021b6a39d215f9dfdc9c28dbcace5995",
+      "onnx_patch": "applied",
+      "patch_fingerprint": "e21be367380c187980c6fd0cb175f6b1f09915748188db8210b2583ad08f8634",
+      "result_commit": "6d41cd6a1c7e20a1555c9976318eeea767c77186",
       "upstream_commit": "e1d10ee7b4f7f730f9af82fd9b4eb7f8f1feddbf",
       "upstream_ref_sha": "e1d10ee7b4f7f730f9af82fd9b4eb7f8f1feddbf"
     },
     "v3.5.1": {
-      "onnx_patch": "warning",
-      "patch_fingerprint": "83ef88810f75d18ef063a5488975d72cd0477128e0ca515b23fd04b28fc8cfce",
-      "result_commit": "7925ffdc107f2be2082e2fea4a5e3e03030f5075",
+      "onnx_patch": "applied",
+      "patch_fingerprint": "e21be367380c187980c6fd0cb175f6b1f09915748188db8210b2583ad08f8634",
+      "result_commit": "0b5a0f8e7d77d5928430136f5e3954182fed40ee",
       "upstream_commit": "11307e0be55be11fec65061b1113f7a423e37399",
       "upstream_ref_sha": "9614652083043e4882642ad9665034f261c24312"
     }
