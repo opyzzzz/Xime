@@ -30,28 +30,47 @@ import re
 begin = "// BEGIN ONNX_DOWNLOAD_PATCH:RAW_HEADERS"
 end = "// END ONNX_DOWNLOAD_PATCH:RAW_HEADERS"
 
-def restrict_headers(source: str) -> str:
+def normalize_onnx_headers(source: str) -> str:
     replacement = '''        val headersToFetch = listOf(
+            "core/session/environment.h",
+            "core/session/experimental_onnxruntime_cxx_api.h",
+            "core/session/experimental_onnxruntime_cxx_inline.h",
             "core/session/onnxruntime_c_api.h",
+            "core/session/onnxruntime_cxx_api.h",
+            "core/session/onnxruntime_cxx_inline.h",
+            "core/session/onnxruntime_env_config_keys.h",
+            "core/session/onnxruntime_ep_c_api.h",
+            "core/session/onnxruntime_ep_device_ep_metadata_keys.h",
             "core/session/onnxruntime_error_code.h",
+            "core/session/onnxruntime_experimental_c_api.h",
+            "core/session/onnxruntime_experimental_c_api.inc",
+            "core/session/onnxruntime_experimental_cxx_api.h",
+            "core/session/onnxruntime_float16.h",
+            "core/session/onnxruntime_lite_custom_op.h",
+            "core/session/onnxruntime_run_options_config_keys.h",
+            "core/session/onnxruntime_session_options_config_keys.h",
         )'''
     updated, count = re.subn(
-        r"        val headersToFetch = listOf\\([\\s\\S]*?\\n        \\)",
+        r"        val headersToFetch = listOf\([\s\S]*?\n        \)",
         lambda _: replacement,
         source,
         count=1,
     )
     if count != 1:
         raise SystemExit("ONNX headersToFetch list changed; refusing to guess required headers.")
+    updated = updated.replace(
+        "https://raw.githubusercontent.com/microsoft/onnxruntime/rel-${onnxVersion}/include/onnxruntime",
+        "https://raw.githubusercontent.com/microsoft/onnxruntime/v${onnxVersion}/include/onnxruntime",
+    )
     return updated
 
 if begin in text and end in text:
-    updated = restrict_headers(text)
+    updated = normalize_onnx_headers(text)
     if updated != text:
         path.write_text(updated, encoding="utf-8")
-        print("Updated existing ONNX patch to fetch only the C API headers used by Xime.")
+        print("Migrated existing ONNX patch to the official v<version> tag and restored the complete header set.")
     else:
-        print("ONNX download patch is already applied with the minimal required header set.")
+        print("ONNX download patch already uses the official v<version> tag and complete header set.")
     raise SystemExit(0)
 if begin in text or end in text:
     raise SystemExit("Incomplete ONNX patch markers; refusing to modify the file.")
@@ -109,5 +128,5 @@ text = text.replace(old_loop, new_loop, 1)
 
 # Write only after all compatibility checks and transformations succeeded.
 path.write_text(text, encoding="utf-8")
-print("ONNX patch applied: version-matched release-branch raw headers with fail-fast verification.")
+print("ONNX patch applied: version-matched official release-tag raw headers with fail-fast verification.")
 PY
