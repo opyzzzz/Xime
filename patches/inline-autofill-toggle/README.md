@@ -53,3 +53,16 @@ bash /tmp/rollback-inline-autofill-toggle.sh
 - 要在临时测试分支验证时，可显式设置 `ALLOW_NON_MAIN=1`。
 - 工作区必须干净；补丁不会覆盖未提交的本地改动。
 - 脚本只做文本插入，不会自动提交、推送或创建 PR。
+
+## 上游 Tag 自动同步 Action
+
+工作流文件：`.github/workflows/sync-upstream-tags.yml`
+
+- 上游固定为 `https://github.com/ximeiorg/Xime.git`。
+- 只读取上游符合 `vMAJOR.MINOR.PATCH` / 预发布格式的版本 Tag；基线为稳定版 `v3.5.0`，因此更早版本以及 `v3.5.0-rc` 等同版本预发布 Tag 不会同步。
+- 不同步上游分支，也不把上游提交合并到 fork 的 `main`。
+- 缺失的上游 Tag 会原样推送到 fork；若 fork 已有同名 Tag 且指向不同提交，工作流会失败并拒绝覆盖。
+- 每个合格 Tag 会独立创建 `upstream-patched/<tag>` 分支，并在该 Tag 的代码上应用本目录的补丁；已存在的补丁分支会跳过。
+- 支持手动触发和每日定时检查（03:17 UTC）。
+
+工作流从 `patch/inline-autofill-toggle` 分支读取补丁脚本。要启用 GitHub 定时触发，需先将该工作流文件合入仓库默认分支；手动运行时可在 Actions 页面选择包含此工作流的分支。
