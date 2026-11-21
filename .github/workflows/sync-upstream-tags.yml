@@ -63,7 +63,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          PATCH_FINGERPRINT="$( { printf 'sync-state-v%s\\n' "$STATE_VERSION"; sha256sum patches/onnx-download/apply.sh patches/inline-autofill-toggle/apply.sh; } | sha256sum | awk '{print $1}')"
+          PATCH_FINGERPRINT="$( { printf 'sync-state-v%s\n' "$STATE_VERSION"; sha256sum patches/onnx-download/apply.sh patches/inline-autofill-toggle/apply.sh; } | sha256sum | awk '{print $1}')"
           echo "patch_fingerprint=$PATCH_FINGERPRINT" >> "$GITHUB_OUTPUT"
 
           python3 - "$PATCH_FINGERPRINT" "$STATE_VERSION" <<'PY' >> "$GITHUB_OUTPUT"
@@ -95,7 +95,7 @@ jobs:
 
           def version_key(tag):
               match = re.fullmatch(
-                  r"v(\\d+)\\.(\\d+)\\.(\\d+)(?:-([0-9A-Za-z.-]+))?(?:\\+[0-9A-Za-z.-]+)?",
+                  r"v(\d+)\\.(\d+)\\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\\+[0-9A-Za-z.-]+)?",
                   tag,
               )
               if not match:
@@ -106,7 +106,7 @@ jobs:
           candidates = []
           total = 0
           for row in rows:
-              ref_sha, ref = row.split("\\t", 1)
+              ref_sha, ref = row.split("\t", 1)
               tag = ref.removeprefix("refs/tags/")
               key = version_key(tag)
               if key is None or key < baseline:
@@ -120,7 +120,7 @@ jobs:
           print(f"tag_count={total}")
           print(f"candidate_count={len(candidates)}")
           print("tags<<EOF")
-          print("\\n".join(tag for _, tag, _ in candidates))
+          print("\n".join(tag for _, tag, _ in candidates))
           print("EOF")
           print(f"state_valid={'true' if state_valid else 'false'}")
           PY
@@ -155,7 +155,7 @@ jobs:
           state["state_version"] = version
           state["patch_fingerprint"] = fingerprint
           state.setdefault("tags", {})
-          Path(target).write_text(json.dumps(state, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
+          Path(target).write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
           PY
 
           # Keep both patch tools from synchronized fork main while checking out upstream tags.
@@ -254,7 +254,7 @@ jobs:
               "onnx_patch": onnx_status,
               "patch_fingerprint": fingerprint,
           }
-          Path(path).write_text(json.dumps(state, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
+          Path(path).write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
           PY
             echo "::endgroup::"
           done <<< "$ELIGIBLE_TAGS"
