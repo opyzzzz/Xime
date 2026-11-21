@@ -2,9 +2,9 @@
 
 This optional patch hardens ONNX Runtime header acquisition in `app/build-logic/tasks-native.gradle.kts`.
 
-- Fetches the ONNX Runtime release-branch archive (`rel-<version>`) matching the pinned runtime version rather than relying on individual raw-file URLs. The Android AAR remains pinned to the numeric `onnxVersion`.
-- Validates that the response is a ZIP before extraction.
-- Verifies every required header exists and fails the Gradle dependency task early if the archive is incomplete.
+- Fetches each required ONNX header directly from the matching ONNX Runtime release branch (`rel-<version>`) using `raw.githubusercontent.com`. The Android AAR remains pinned to the numeric `onnxVersion`.
+- Rejects missing, empty, and HTML error responses instead of silently accepting invalid headers.
+- Verifies every required header downloads successfully and fails the Gradle dependency task immediately if any header is missing.
 - Keeps the AAR version pinned to the same `onnxVersion` as the headers.
 
 The patch is deliberately independent of the inline-autofill patch. The tag sync workflow attempts this patch first; incompatibility is reported as a warning and does not block publication, while failure of the required inline-autofill patch does block publication.
