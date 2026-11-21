@@ -26,7 +26,7 @@ if not path.is_file():
 text = path.read_text(encoding="utf-8")
 
 begin = "// BEGIN ONNX_DOWNLOAD_PATCH:RAW_HEADERS"
-end = "// END ONNX_DOWNLOAD_PATCH:ARCHIVE_HEADERS"
+end = "// END ONNX_DOWNLOAD_PATCH:RAW_HEADERS"
 if begin in text and end in text:
     print("ONNX download patch is already applied.")
     raise SystemExit(0)
@@ -69,12 +69,12 @@ new_loop = '''        // BEGIN ONNX_DOWNLOAD_PATCH:RAW_HEADERS
             val url = "$onnxHeadersBase/$rel"
             target.delete()
             if (!downloadWithMirrors(githubUrls(url), target, buildDir, "onnxruntime header $rel")) {
-                throw GradleException("Failed to download required ONNX Runtime v\${onnxVersion} header: $rel")
+                throw GradleException("Failed to download required ONNX Runtime v${onnxVersion} header: $rel")
             }
-            if (!target.isFile || target.length() == 0L) {
+            if (!target.isFile || target.length() < 100L || target.readText().trimStart().startsWith("<")) {
                 throw GradleException("Downloaded ONNX Runtime header is empty or missing: $rel")
             }
-            println("Header ok: \${target.name} (\${target.length()} bytes)")
+            println("Header ok: ${target.name} (${target.length()} bytes)")
         }
         // END ONNX_DOWNLOAD_PATCH:RAW_HEADERS
 '''
