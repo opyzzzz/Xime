@@ -1,6 +1,13 @@
 {
-  "state_version": 2,
   "baseline_tag": "v3.5.2",
-  "patch_fingerprint": "",
-  "tags": {}
+  "patch_fingerprint": "2d05458e645bd310696218d6123e180ed412cb893f9614ed742bde925b7b109d",
+  "state_version": 2,
+  "tags": {
+    "v3.6.0-alpha.1": {
+      "patch_fingerprint": "2d05458e645bd310696218d6123e180ed412cb893f9614ed742bde925b7b109d",
+      "result_commit": "15e711d004f5736ee72b1bfa00ffd82452c7090c",
+      "upstream_commit": "546f66d832391517edf938dd5fa2a805750aea14",
+      "upstream_ref_sha": "546f66d832391517edf938dd5fa2a805750aea14"
+    }
+  }
 }
