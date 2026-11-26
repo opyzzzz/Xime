@@ -364,6 +364,7 @@ private fun parseKeyAction(
         var iconName = ""
         var action: GestureAction? = defaultAction
         var explicitAction = false
+        var literalComposition = false
         var value = ""
         var display = "key"
         var bubble = true
@@ -391,6 +392,7 @@ private fun parseKeyAction(
                     }
                 }
                 "value" -> (v as? YamlScalar)?.content?.let { value = it }
+                "composition" -> literalComposition = (v as? YamlScalar)?.content == "literal"
                 "display" -> (v as? YamlScalar)?.content?.let { display = it }
                 "bubble" -> bubble = (v as? YamlScalar)?.content?.toBooleanStrictOrNull() ?: true
                 // 图标名：`icon: mic` 与历史写法 `label: "@mic"` 等价
@@ -401,6 +403,12 @@ private fun parseKeyAction(
         val iconFromLabel = if (label.startsWith("@")) label.removePrefix("@") else ""
         val icon = iconName.ifEmpty { iconFromLabel }
         val cleanLabel = if (iconFromLabel.isNotEmpty()) "" else label
+        val commitValue = value.ifEmpty { cleanLabel }
+        if (explicitAction && action == GestureAction.COMMIT && literalComposition &&
+            commitValue.length == 1 && commitValue[0] in '0'..'9'
+        ) {
+            action = GestureAction.COMMIT_LITERAL_DIGIT
+        }
         return KeyAction(
             action = action,
             value = value,
@@ -2465,6 +2473,31 @@ object KeysConfigHelper {
         val label = config[key.lowercase()]?.tap?.label
         if (label.isNullOrEmpty()) return key.uppercase()
         return if (label.any { it in 'a'..'z' || it in 'A'..'Z' }) label.uppercase() else label
+    }
+
+    /** 原始 tap.label（不做大写转换、无回退），未配置返回 null。 */
+    fun getKeyTapLabel(key: String, isAsciiMode: Boolean = false): String? {
+        val config = if (isAsciiMode) _keyGestureConfigEn.value else _keyGestureConfig.value
+        return config[key.lowercase()]?.tap?.label?.takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * 英文键盘的键帽主文案。
+     *
+     * 英文键盘不能直接用 [getKeyDisplayLabel]：它对含字母的 label 一律大写、无 label 时回退
+     * 按键 id 大写，非 shift 状态下会显示成 "Q"；所以这里默认用提交值（跟随 shift）。
+     * 但自定义键的 label 与提交值并不相同（如 `qqq: { label: "123", value: "mode_change_number" }`），
+     * 这种情况必须显示 label，否则键面会露出手势命令值。
+     */
+    internal fun asciiKeyFaceText(
+        tapLabel: String?,
+        rawCommitValue: String,
+        isShifted: Boolean,
+    ): String {
+        if (!tapLabel.isNullOrEmpty() && !tapLabel.equals(rawCommitValue, ignoreCase = true)) {
+            return tapLabel
+        }
+        return if (isShifted) rawCommitValue.uppercase() else rawCommitValue
     }
 
     fun getKeyCommitValue(key: String, isAsciiMode: Boolean = false): String {
